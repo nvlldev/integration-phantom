@@ -341,6 +341,10 @@ class PhantomRemainderBaseSensor(SensorEntity, RestoreEntity):
         self._upstream_entity = upstream_entity
         self._state = None
         self._available = True
+        self._group_total = 0
+        self._upstream_value = None
+        self._group_entities_available = 0
+        self._upstream_available = False
         
         self._unsubscribe_listeners = []
 
@@ -398,10 +402,18 @@ class PhantomRemainderBaseSensor(SensorEntity, RestoreEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
-        return {
+        attributes = {
             ATTR_ENTITIES: self._entities,
             f"upstream_{self._sensor_type}_entity": self._upstream_entity,
+            "group_total": self._group_total,
+            "group_entities_available": self._group_entities_available,
+            "upstream_available": self._upstream_available,
         }
+        
+        if self._upstream_value is not None:
+            attributes["upstream_value"] = self._upstream_value
+            
+        return attributes
 
     async def async_added_to_hass(self) -> None:
         """Run when entity about to be added to hass."""
@@ -455,22 +467,48 @@ class PhantomRemainderBaseSensor(SensorEntity, RestoreEntity):
                 except (ValueError, TypeError):
                     continue
         
-        # Get upstream value
+        # Store group info for attributes
+        self._group_total = round(group_total, 2)
+        self._group_entities_available = available_entities
+        
+        # Check upstream availability
         upstream_state = self.hass.states.get(self._upstream_entity)
-        if (
-            available_entities > 0
-            and upstream_state 
+        upstream_available = (
+            upstream_state 
             and upstream_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE)
-        ):
+        )
+        self._upstream_available = upstream_available
+        
+        # Try to get upstream value
+        upstream_value = None
+        if upstream_available:
             try:
                 upstream_value = float(upstream_state.state)
+                self._upstream_value = round(upstream_value, 2)
+            except (ValueError, TypeError):
+                upstream_value = None
+                self._upstream_value = None
+                upstream_available = False
+                self._upstream_available = False
+        else:
+            self._upstream_value = None
+        
+        # Sensor is available if we have either group data or upstream data
+        if available_entities > 0 or upstream_available:
+            self._available = True
+            
+            # Try to calculate remainder if both are available
+            if available_entities > 0 and upstream_available:
                 remainder = upstream_value - group_total
                 self._state = round(remainder, 2)
-                self._available = True
-            except (ValueError, TypeError):
-                self._available = False
-                self._state = None
+            elif upstream_available:
+                # Only upstream available, remainder equals upstream value
+                self._state = round(upstream_value, 2)
+            else:
+                # Only group available, remainder is negative of group total
+                self._state = round(-group_total, 2)
         else:
+            # Neither group nor upstream available
             self._available = False
             self._state = None
         
