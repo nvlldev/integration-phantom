@@ -207,16 +207,30 @@ class PhantomOptionsFlowHandler(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Manage the options."""
+        errors: dict[str, str] = {}
+        
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            # Validate that at least one entity type is selected
+            power_entities = user_input.get(CONF_POWER_ENTITIES, [])
+            energy_entities = user_input.get(CONF_ENERGY_ENTITIES, [])
+            
+            if not power_entities and not energy_entities:
+                errors["base"] = "no_entities_selected"
+            else:
+                return self.async_create_entry(title="", data=user_input)
 
         power_entities = _get_power_entities(self.hass)
         energy_entities = _get_energy_entities(self.hass)
 
-        current_power_entities = self.config_entry.data.get(CONF_POWER_ENTITIES, [])
-        current_energy_entities = self.config_entry.data.get(CONF_ENERGY_ENTITIES, [])
-        current_upstream_power = self.config_entry.data.get(CONF_UPSTREAM_POWER_ENTITY)
-        current_upstream_energy = self.config_entry.data.get(CONF_UPSTREAM_ENERGY_ENTITY)
+        # Get current values from both data and options (options take precedence)
+        config = {**self.config_entry.data}
+        if self.config_entry.options:
+            config.update(self.config_entry.options)
+            
+        current_power_entities = config.get(CONF_POWER_ENTITIES, [])
+        current_energy_entities = config.get(CONF_ENERGY_ENTITIES, [])
+        current_upstream_power = config.get(CONF_UPSTREAM_POWER_ENTITY)
+        current_upstream_energy = config.get(CONF_UPSTREAM_ENERGY_ENTITY)
 
         # Remove currently selected entities from upstream options
         upstream_power_options = [
@@ -233,7 +247,7 @@ class PhantomOptionsFlowHandler(config_entries.OptionsFlow):
             {
                 vol.Required(
                     CONF_GROUP_NAME, 
-                    default=self.config_entry.data.get(CONF_GROUP_NAME, DEFAULT_GROUP_NAME)
+                    default=config.get(CONF_GROUP_NAME, DEFAULT_GROUP_NAME)
                 ): str,
                 vol.Optional(
                     CONF_POWER_ENTITIES, 
@@ -279,4 +293,5 @@ class PhantomOptionsFlowHandler(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="init",
             data_schema=data_schema,
+            errors=errors,
         )

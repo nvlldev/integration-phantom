@@ -18,6 +18,7 @@ from homeassistant.const import (
     UnitOfPower,
 )
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -126,6 +127,17 @@ class PhantomBaseSensor(SensorEntity, RestoreEntity):
         self._attributes = {}
         
         self._unsubscribe_listeners = []
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._config_entry_id)},
+            name=self._group_name,
+            manufacturer="Phantom",
+            model="Power Monitor",
+            sw_version="1.0.0",
+        )
 
     @property
     def _sensor_type(self) -> str:
@@ -321,6 +333,17 @@ class PhantomRemainderBaseSensor(SensorEntity, RestoreEntity):
         self._available = True
         
         self._unsubscribe_listeners = []
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._config_entry_id)},
+            name=self._group_name,
+            manufacturer="Phantom",
+            model="Power Monitor",
+            sw_version="1.0.0",
+        )
 
     @property
     def _sensor_type(self) -> str:

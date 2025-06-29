@@ -7,9 +7,10 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.typing import ConfigType
 
-from .const import DOMAIN
+from .const import CONF_GROUP_NAME, DEFAULT_GROUP_NAME, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -25,9 +26,33 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Phantom Power Monitoring from a config entry."""
     hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = entry.data
+    
+    # Merge entry.data with entry.options, with options taking precedence
+    config = {**entry.data}
+    if entry.options:
+        config.update(entry.options)
+    
+    hass.data[DOMAIN][entry.entry_id] = config
 
+    # Create device registry entry
+    device_registry = dr.async_get(hass)
+    group_name = config.get(CONF_GROUP_NAME, DEFAULT_GROUP_NAME)
+    
+    device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, entry.entry_id)},
+        name=group_name,
+        manufacturer="Phantom",
+        model="Power Monitor",
+        sw_version="1.0.0",
+    )
+
+    # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    
+    # Add options update listener
+    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
+    
     return True
 
 
