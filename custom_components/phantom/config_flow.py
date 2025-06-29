@@ -216,7 +216,6 @@ class PhantomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="upstream",
             data_schema=data_schema,
-            description_placeholders={"group_name": self._data[CONF_GROUP_NAME]},
         )
 
     @staticmethod
