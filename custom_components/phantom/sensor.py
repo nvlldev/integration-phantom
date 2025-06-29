@@ -129,6 +129,11 @@ class PhantomBaseSensor(SensorEntity, RestoreEntity):
         self._unsubscribe_listeners = []
 
     @property
+    def has_entity_name(self) -> bool:
+        """Return True if entity has a name."""
+        return True
+
+    @property
     def device_info(self) -> DeviceInfo:
         """Return device information."""
         return DeviceInfo(
@@ -150,9 +155,14 @@ class PhantomBaseSensor(SensorEntity, RestoreEntity):
         return f"{self._config_entry_id}_{self._sensor_type}"
 
     @property
-    def name(self) -> str:
+    def name(self) -> str | None:
         """Return the name of the sensor."""
-        return f"{self._group_name} {self._sensor_type.title()}"
+        # For the main sensors, we'll use descriptive names
+        if self._sensor_type == "power":
+            return "Power"
+        elif self._sensor_type == "energy":
+            return "Energy"
+        return None
 
     @property
     def should_poll(self) -> bool:
@@ -335,6 +345,11 @@ class PhantomRemainderBaseSensor(SensorEntity, RestoreEntity):
         self._unsubscribe_listeners = []
 
     @property
+    def has_entity_name(self) -> bool:
+        """Return True if entity has a name."""
+        return True
+
+    @property
     def device_info(self) -> DeviceInfo:
         """Return device information."""
         return DeviceInfo(
@@ -358,7 +373,12 @@ class PhantomRemainderBaseSensor(SensorEntity, RestoreEntity):
     @property
     def name(self) -> str:
         """Return the name of the sensor."""
-        return f"{self._group_name} {self._sensor_type.title()} Remainder"
+        # Remainder sensors get descriptive names
+        if self._sensor_type == "power":
+            return "Power remainder"
+        elif self._sensor_type == "energy":
+            return "Energy remainder"
+        return "Remainder"
 
     @property
     def should_poll(self) -> bool:
