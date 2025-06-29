@@ -11,7 +11,6 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
-    ATTR_ENTITY_ID,
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
     UnitOfEnergy,
@@ -24,10 +23,6 @@ from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
-    ATTR_ENTITIES,
-    ATTR_REMAINDER,
-    ATTR_UPSTREAM_POWER_ENTITY,
-    ATTR_UPSTREAM_ENERGY_ENTITY,
     CONF_ENERGY_ENTITIES,
     CONF_POWER_ENTITIES,
     CONF_UPSTREAM_POWER_ENTITY,
@@ -52,76 +47,69 @@ async def async_setup_entry(
     energy_entities = config.get(CONF_ENERGY_ENTITIES, [])
     upstream_power_entity = config.get(CONF_UPSTREAM_POWER_ENTITY)
     upstream_energy_entity = config.get(CONF_UPSTREAM_ENERGY_ENTITY)
-    device_name = config_entry.title
     
+    # Power sensors
     if power_entities:
+        # Power group total
         entities.append(
             PhantomPowerSensor(
                 hass,
-                config_entry.entry_id,
-                device_name,
+                config_entry,
                 power_entities,
-                upstream_power_entity,
             )
         )
         
-        # Add remainder sensor if upstream power entity is configured
+        # Power remainder if upstream configured
         if upstream_power_entity:
             entities.append(
                 PhantomPowerRemainderSensor(
                     hass,
-                    config_entry.entry_id,
-                    device_name,
+                    config_entry,
                     power_entities,
                     upstream_power_entity,
                 )
             )
     
+    # Energy sensors
     if energy_entities:
-        # Create individual utility meter sensors for each energy entity
-        for entity_id in energy_entities:
-            entities.append(
-                PhantomUtilityMeterSensor(
-                    hass,
-                    config_entry.entry_id,
-                    device_name,
-                    entity_id,
-                )
-            )
-        
-        # Create group energy sensor (sum of original entities)
+        # Energy group total
         entities.append(
             PhantomEnergySensor(
                 hass,
-                config_entry.entry_id,
-                device_name,
+                config_entry,
                 energy_entities,
-                upstream_energy_entity,
             )
         )
         
-        # Create group utility meter sensor (sum of utility meters)
-        entities.append(
-            PhantomGroupUtilityMeterSensor(
-                hass,
-                config_entry.entry_id,
-                device_name,
-                energy_entities,
-                upstream_energy_entity,
-            )
-        )
-        
-        # Add remainder sensor if upstream energy entity is configured
+        # Energy remainder if upstream configured
         if upstream_energy_entity:
             entities.append(
                 PhantomEnergyRemainderSensor(
                     hass,
-                    config_entry.entry_id,
-                    device_name,
+                    config_entry,
                     energy_entities,
                     upstream_energy_entity,
                 )
             )
+        
+        # Individual utility meters for each energy entity
+        for entity_id in energy_entities:
+            entities.append(
+                PhantomUtilityMeterSensor(
+                    hass,
+                    config_entry,
+                    entity_id,
+                )
+            )
+        
+        # Group utility meter (sum of individual meters)
+        entities.append(
+            PhantomGroupUtilityMeterSensor(
+                hass,
+                config_entry,
+                energy_entities,
+            )
+        )
     
     async_add_entities(entities)
 
@@ -132,21 +120,15 @@ class PhantomBaseSensor(SensorEntity, RestoreEntity):
     def __init__(
         self,
         hass: HomeAssistant,
-        config_entry_id: str,
-        device_name: str,
+        config_entry: ConfigEntry,
         entities: list[str],
-        upstream_entity: str | None = None,
     ) -> None:
         """Initialize the sensor."""
         self.hass = hass
-        self._config_entry_id = config_entry_id
-        self._device_name = device_name
+        self._config_entry = config_entry
         self._entities = entities
-        self._upstream_entity = upstream_entity
         self._state = None
         self._available = True
-        self._attributes = {}
-        
         self._unsubscribe_listeners = []
 
     @property
@@ -158,32 +140,12 @@ class PhantomBaseSensor(SensorEntity, RestoreEntity):
     def device_info(self) -> DeviceInfo:
         """Return device information."""
         return DeviceInfo(
-            identifiers={(DOMAIN, self._config_entry_id)},
-            name=self._device_name,
+            identifiers={(DOMAIN, self._config_entry.entry_id)},
+            name=self._config_entry.title,
             manufacturer="Phantom",
             model="Power Monitor",
             sw_version="1.0.0",
         )
-
-    @property
-    def _sensor_type(self) -> str:
-        """Return the sensor type. Must be implemented by subclasses."""
-        raise NotImplementedError
-
-    @property
-    def unique_id(self) -> str:
-        """Return a unique ID."""
-        return f"{self._config_entry_id}_{self._sensor_type}"
-
-    @property
-    def name(self) -> str | None:
-        """Return the name of the sensor."""
-        # For the main sensors, we'll use descriptive names
-        if self._sensor_type == "power":
-            return "Power"
-        elif self._sensor_type == "energy":
-            return "Energy"
-        return None
 
     @property
     def should_poll(self) -> bool:
@@ -203,46 +165,32 @@ class PhantomBaseSensor(SensorEntity, RestoreEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
-        attributes = {
-            ATTR_ENTITIES: self._entities,
+        return {
+            "entities": self._entities,
         }
-        if self._upstream_entity:
-            # Use appropriate upstream entity attribute based on sensor type
-            if self._sensor_type == "power":
-                attributes[ATTR_UPSTREAM_POWER_ENTITY] = self._upstream_entity
-            elif self._sensor_type == "energy":
-                attributes[ATTR_UPSTREAM_ENERGY_ENTITY] = self._upstream_entity
-            
-            if ATTR_REMAINDER in self._attributes:
-                attributes[ATTR_REMAINDER] = self._attributes[ATTR_REMAINDER]
-        
-        return attributes
 
     async def async_added_to_hass(self) -> None:
         """Run when entity about to be added to hass."""
         await super().async_added_to_hass()
         
+        # Restore last state
         if last_state := await self.async_get_last_state():
-            self._state = last_state.state
             if last_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
                 try:
                     self._state = float(last_state.state)
                 except (ValueError, TypeError):
                     self._state = None
 
-        # Track all entities
-        all_entities = self._entities[:]
-        if self._upstream_entity:
-            all_entities.append(self._upstream_entity)
-
+        # Track entity state changes
         self._unsubscribe_listeners.append(
             async_track_state_change_event(
                 self.hass,
-                all_entities,
+                self._entities,
                 self._async_state_changed,
             )
         )
         
+        # Initial state update
         await self._async_update_state()
 
     async def async_will_remove_from_hass(self) -> None:
@@ -257,50 +205,22 @@ class PhantomBaseSensor(SensorEntity, RestoreEntity):
         self.hass.async_create_task(self._async_update_state())
 
     async def _async_update_state(self) -> None:
-        """Update the sensor state."""
-        total = 0
-        available_entities = 0
-        
-        for entity_id in self._entities:
-            state = self.hass.states.get(entity_id)
-            if state and state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-                try:
-                    value = float(state.state)
-                    total += value
-                    available_entities += 1
-                except (ValueError, TypeError):
-                    continue
-        
-        if available_entities == 0:
-            self._available = False
-            self._state = None
-        else:
-            self._available = True
-            self._state = round(total, 2)
-        
-        # Calculate remainder if upstream entity is configured
-        if self._upstream_entity:
-            upstream_state = self.hass.states.get(self._upstream_entity)
-            if upstream_state and upstream_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-                try:
-                    upstream_value = float(upstream_state.state)
-                    remainder = upstream_value - total
-                    self._attributes[ATTR_REMAINDER] = round(remainder, 2)
-                except (ValueError, TypeError):
-                    self._attributes.pop(ATTR_REMAINDER, None)
-            else:
-                self._attributes.pop(ATTR_REMAINDER, None)
-        
-        self.async_write_ha_state()
+        """Update the sensor state. Must be implemented by subclasses."""
+        raise NotImplementedError
 
 
 class PhantomPowerSensor(PhantomBaseSensor):
-    """Phantom power monitoring sensor."""
+    """Phantom power group sensor."""
 
     @property
-    def _sensor_type(self) -> str:
-        """Return the sensor type."""
-        return "power"
+    def unique_id(self) -> str:
+        """Return a unique ID."""
+        return f"{self._config_entry.entry_id}_power"
+
+    @property
+    def name(self) -> str:
+        """Return the name of the sensor."""
+        return "Power"
 
     @property
     def device_class(self) -> SensorDeviceClass:
@@ -317,14 +237,44 @@ class PhantomPowerSensor(PhantomBaseSensor):
         """Return the unit of measurement."""
         return UnitOfPower.WATT
 
+    async def _async_update_state(self) -> None:
+        """Update the power sensor state."""
+        total = 0.0
+        available_count = 0
+        
+        for entity_id in self._entities:
+            state = self.hass.states.get(entity_id)
+            if state and state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                try:
+                    value = float(state.state)
+                    total += value
+                    available_count += 1
+                except (ValueError, TypeError):
+                    _LOGGER.warning("Invalid power value for %s: %s", entity_id, state.state)
+                    continue
+        
+        if available_count > 0:
+            self._available = True
+            self._state = round(total, 2)
+        else:
+            self._available = False
+            self._state = None
+        
+        self.async_write_ha_state()
+
 
 class PhantomEnergySensor(PhantomBaseSensor):
-    """Phantom energy monitoring sensor."""
+    """Phantom energy group sensor."""
 
     @property
-    def _sensor_type(self) -> str:
-        """Return the sensor type."""
-        return "energy"
+    def unique_id(self) -> str:
+        """Return a unique ID."""
+        return f"{self._config_entry.entry_id}_energy"
+
+    @property
+    def name(self) -> str:
+        """Return the name of the sensor."""
+        return "Energy"
 
     @property
     def device_class(self) -> SensorDeviceClass:
@@ -339,8 +289,32 @@ class PhantomEnergySensor(PhantomBaseSensor):
     @property
     def native_unit_of_measurement(self) -> str:
         """Return the unit of measurement."""
-        # Default to kWh, but could be made configurable
         return UnitOfEnergy.KILO_WATT_HOUR
+
+    async def _async_update_state(self) -> None:
+        """Update the energy sensor state."""
+        total = 0.0
+        available_count = 0
+        
+        for entity_id in self._entities:
+            state = self.hass.states.get(entity_id)
+            if state and state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                try:
+                    value = float(state.state)
+                    total += value
+                    available_count += 1
+                except (ValueError, TypeError):
+                    _LOGGER.warning("Invalid energy value for %s: %s", entity_id, state.state)
+                    continue
+        
+        if available_count > 0:
+            self._available = True
+            self._state = round(total, 3)
+        else:
+            self._available = False
+            self._state = None
+        
+        self.async_write_ha_state()
 
 
 class PhantomRemainderBaseSensor(SensorEntity, RestoreEntity):
@@ -349,24 +323,17 @@ class PhantomRemainderBaseSensor(SensorEntity, RestoreEntity):
     def __init__(
         self,
         hass: HomeAssistant,
-        config_entry_id: str,
-        device_name: str,
+        config_entry: ConfigEntry,
         entities: list[str],
         upstream_entity: str,
     ) -> None:
         """Initialize the remainder sensor."""
         self.hass = hass
-        self._config_entry_id = config_entry_id
-        self._device_name = device_name
+        self._config_entry = config_entry
         self._entities = entities
         self._upstream_entity = upstream_entity
         self._state = None
         self._available = True
-        self._group_total = 0
-        self._upstream_value = None
-        self._group_entities_available = 0
-        self._upstream_available = False
-        
         self._unsubscribe_listeners = []
 
     @property
@@ -378,32 +345,12 @@ class PhantomRemainderBaseSensor(SensorEntity, RestoreEntity):
     def device_info(self) -> DeviceInfo:
         """Return device information."""
         return DeviceInfo(
-            identifiers={(DOMAIN, self._config_entry_id)},
-            name=self._device_name,
+            identifiers={(DOMAIN, self._config_entry.entry_id)},
+            name=self._config_entry.title,
             manufacturer="Phantom",
             model="Power Monitor",
             sw_version="1.0.0",
         )
-
-    @property
-    def _sensor_type(self) -> str:
-        """Return the sensor type. Must be implemented by subclasses."""
-        raise NotImplementedError
-
-    @property
-    def unique_id(self) -> str:
-        """Return a unique ID."""
-        return f"{self._config_entry_id}_{self._sensor_type}_remainder"
-
-    @property
-    def name(self) -> str:
-        """Return the name of the sensor."""
-        # Remainder sensors get descriptive names
-        if self._sensor_type == "power":
-            return "Power remainder"
-        elif self._sensor_type == "energy":
-            return "Energy remainder"
-        return "Remainder"
 
     @property
     def should_poll(self) -> bool:
@@ -423,25 +370,17 @@ class PhantomRemainderBaseSensor(SensorEntity, RestoreEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
-        attributes = {
-            ATTR_ENTITIES: self._entities,
-            f"upstream_{self._sensor_type}_entity": self._upstream_entity,
-            "group_total": self._group_total,
-            "group_entities_available": self._group_entities_available,
-            "upstream_available": self._upstream_available,
+        return {
+            "entities": self._entities,
+            "upstream_entity": self._upstream_entity,
         }
-        
-        if self._upstream_value is not None:
-            attributes["upstream_value"] = self._upstream_value
-            
-        return attributes
 
     async def async_added_to_hass(self) -> None:
         """Run when entity about to be added to hass."""
         await super().async_added_to_hass()
         
+        # Restore last state
         if last_state := await self.async_get_last_state():
-            self._state = last_state.state
             if last_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
                 try:
                     self._state = float(last_state.state)
@@ -450,7 +389,6 @@ class PhantomRemainderBaseSensor(SensorEntity, RestoreEntity):
 
         # Track all entities including upstream
         all_entities = self._entities + [self._upstream_entity]
-
         self._unsubscribe_listeners.append(
             async_track_state_change_event(
                 self.hass,
@@ -459,6 +397,7 @@ class PhantomRemainderBaseSensor(SensorEntity, RestoreEntity):
             )
         )
         
+        # Initial state update
         await self._async_update_state()
 
     async def async_will_remove_from_hass(self) -> None:
@@ -475,8 +414,8 @@ class PhantomRemainderBaseSensor(SensorEntity, RestoreEntity):
     async def _async_update_state(self) -> None:
         """Update the remainder sensor state."""
         # Calculate group total
-        group_total = 0
-        available_entities = 0
+        group_total = 0.0
+        group_available = 0
         
         for entity_id in self._entities:
             state = self.hass.states.get(entity_id)
@@ -484,52 +423,34 @@ class PhantomRemainderBaseSensor(SensorEntity, RestoreEntity):
                 try:
                     value = float(state.state)
                     group_total += value
-                    available_entities += 1
+                    group_available += 1
                 except (ValueError, TypeError):
+                    _LOGGER.warning("Invalid value for %s: %s", entity_id, state.state)
                     continue
         
-        # Store group info for attributes
-        self._group_total = round(group_total, 2)
-        self._group_entities_available = available_entities
-        
-        # Check upstream availability
+        # Get upstream value
         upstream_state = self.hass.states.get(self._upstream_entity)
-        upstream_available = (
-            upstream_state 
-            and upstream_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE)
-        )
-        self._upstream_available = upstream_available
-        
-        # Try to get upstream value
         upstream_value = None
-        if upstream_available:
+        upstream_available = False
+        
+        if upstream_state and upstream_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
             try:
                 upstream_value = float(upstream_state.state)
-                self._upstream_value = round(upstream_value, 2)
+                upstream_available = True
             except (ValueError, TypeError):
-                upstream_value = None
-                self._upstream_value = None
-                upstream_available = False
-                self._upstream_available = False
-        else:
-            self._upstream_value = None
+                _LOGGER.warning("Invalid upstream value for %s: %s", self._upstream_entity, upstream_state.state)
         
-        # Sensor is available if we have either group data or upstream data
-        if available_entities > 0 or upstream_available:
+        # Calculate remainder if both are available
+        if group_available > 0 and upstream_available:
             self._available = True
-            
-            # Try to calculate remainder if both are available
-            if available_entities > 0 and upstream_available:
-                remainder = upstream_value - group_total
-                self._state = round(remainder, 2)
-            elif upstream_available:
-                # Only upstream available, remainder equals upstream value
-                self._state = round(upstream_value, 2)
-            else:
-                # Only group available, remainder is negative of group total
-                self._state = round(-group_total, 2)
+            remainder = upstream_value - group_total
+            self._state = round(remainder, 3)
+        elif upstream_available:
+            # Only upstream available
+            self._available = True
+            self._state = round(upstream_value, 3)
         else:
-            # Neither group nor upstream available
+            # Not enough data
             self._available = False
             self._state = None
         
@@ -540,9 +461,14 @@ class PhantomPowerRemainderSensor(PhantomRemainderBaseSensor):
     """Phantom power remainder sensor."""
 
     @property
-    def _sensor_type(self) -> str:
-        """Return the sensor type."""
-        return "power"
+    def unique_id(self) -> str:
+        """Return a unique ID."""
+        return f"{self._config_entry.entry_id}_power_remainder"
+
+    @property
+    def name(self) -> str:
+        """Return the name of the sensor."""
+        return "Power remainder"
 
     @property
     def device_class(self) -> SensorDeviceClass:
@@ -564,9 +490,14 @@ class PhantomEnergyRemainderSensor(PhantomRemainderBaseSensor):
     """Phantom energy remainder sensor."""
 
     @property
-    def _sensor_type(self) -> str:
-        """Return the sensor type."""
-        return "energy"
+    def unique_id(self) -> str:
+        """Return a unique ID."""
+        return f"{self._config_entry.entry_id}_energy_remainder"
+
+    @property
+    def name(self) -> str:
+        """Return the name of the sensor."""
+        return "Energy remainder"
 
     @property
     def device_class(self) -> SensorDeviceClass:
@@ -585,25 +516,22 @@ class PhantomEnergyRemainderSensor(PhantomRemainderBaseSensor):
 
 
 class PhantomUtilityMeterSensor(SensorEntity, RestoreEntity):
-    """Utility meter sensor that tracks energy usage from integration setup."""
+    """Individual utility meter sensor that tracks energy usage from setup."""
 
     def __init__(
         self,
         hass: HomeAssistant,
-        config_entry_id: str,
-        device_name: str,
+        config_entry: ConfigEntry,
         source_entity_id: str,
     ) -> None:
         """Initialize the utility meter sensor."""
         self.hass = hass
-        self._config_entry_id = config_entry_id
-        self._device_name = device_name
+        self._config_entry = config_entry
         self._source_entity_id = source_entity_id
         self._state = 0.0
         self._available = True
         self._baseline_value = None
         self._last_source_value = None
-        
         self._unsubscribe_listeners = []
 
     @property
@@ -615,8 +543,8 @@ class PhantomUtilityMeterSensor(SensorEntity, RestoreEntity):
     def device_info(self) -> DeviceInfo:
         """Return device information."""
         return DeviceInfo(
-            identifiers={(DOMAIN, self._config_entry_id)},
-            name=self._device_name,
+            identifiers={(DOMAIN, self._config_entry.entry_id)},
+            name=self._config_entry.title,
             manufacturer="Phantom",
             model="Power Monitor",
             sw_version="1.0.0",
@@ -625,17 +553,18 @@ class PhantomUtilityMeterSensor(SensorEntity, RestoreEntity):
     @property
     def unique_id(self) -> str:
         """Return a unique ID."""
-        return f"{self._config_entry_id}_utility_meter_{self._source_entity_id}"
+        # Clean entity ID for use in unique ID
+        clean_id = self._source_entity_id.replace(".", "_")
+        return f"{self._config_entry.entry_id}_meter_{clean_id}"
 
     @property
     def name(self) -> str:
         """Return the name of the sensor."""
-        # Get friendly name of source entity
         source_state = self.hass.states.get(self._source_entity_id)
         if source_state:
             source_name = source_state.attributes.get("friendly_name", self._source_entity_id)
-            return f"{source_name} usage"
-        return f"{self._source_entity_id} usage"
+            return f"{source_name} meter"
+        return f"{self._source_entity_id} meter"
 
     @property
     def should_poll(self) -> bool:
@@ -670,32 +599,26 @@ class PhantomUtilityMeterSensor(SensorEntity, RestoreEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
-        attributes = {
-            "source_entity": self._source_entity_id,
-        }
+        attributes = {"source_entity": self._source_entity_id}
         if self._baseline_value is not None:
-            attributes["baseline_value"] = self._baseline_value
-        if self._last_source_value is not None:
-            attributes["last_source_value"] = self._last_source_value
+            attributes["baseline"] = self._baseline_value
         return attributes
 
     async def async_added_to_hass(self) -> None:
         """Run when entity about to be added to hass."""
         await super().async_added_to_hass()
         
-        # Restore state if available
+        # Restore state
         if last_state := await self.async_get_last_state():
             if last_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
                 try:
                     self._state = float(last_state.state)
-                    # Restore baseline from attributes
                     if last_state.attributes:
-                        self._baseline_value = last_state.attributes.get("baseline_value")
-                        self._last_source_value = last_state.attributes.get("last_source_value")
+                        self._baseline_value = last_state.attributes.get("baseline")
                 except (ValueError, TypeError):
                     self._state = 0.0
 
-        # Set baseline if not already set
+        # Set initial baseline if needed
         if self._baseline_value is None:
             source_state = self.hass.states.get(self._source_entity_id)
             if source_state and source_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
@@ -709,7 +632,7 @@ class PhantomUtilityMeterSensor(SensorEntity, RestoreEntity):
                 self._baseline_value = 0.0
                 self._last_source_value = 0.0
 
-        # Track source entity
+        # Track source entity changes
         self._unsubscribe_listeners.append(
             async_track_state_change_event(
                 self.hass,
@@ -740,28 +663,30 @@ class PhantomUtilityMeterSensor(SensorEntity, RestoreEntity):
             return
         
         try:
-            current_source_value = float(source_state.state)
+            current_value = float(source_state.state)
             
-            # Handle resets in source meter (value went down significantly)
+            # Detect reset (significant decrease)
             if (self._last_source_value is not None and 
-                current_source_value < self._last_source_value - 1.0):  # Allow for small fluctuations
-                # Source meter was reset, add the difference to our baseline
-                self._baseline_value = self._baseline_value - current_source_value
+                current_value < self._last_source_value - 1.0):
+                # Adjust baseline to account for reset
+                usage_before_reset = self._last_source_value - self._baseline_value
+                self._baseline_value = current_value - usage_before_reset
             
             # Calculate usage since baseline
-            usage = current_source_value - self._baseline_value
+            usage = current_value - self._baseline_value
             if usage >= 0:
                 self._state = round(usage, 3)
                 self._available = True
             else:
-                # Negative usage, likely a reset - adjust baseline
-                self._baseline_value = current_source_value
+                # Negative usage indicates a problem, reset
+                self._baseline_value = current_value
                 self._state = 0.0
                 self._available = True
             
-            self._last_source_value = current_source_value
+            self._last_source_value = current_value
             
         except (ValueError, TypeError):
+            _LOGGER.warning("Invalid utility meter value for %s: %s", self._source_entity_id, source_state.state)
             self._available = False
         
         self.async_write_ha_state()
@@ -773,20 +698,15 @@ class PhantomGroupUtilityMeterSensor(SensorEntity, RestoreEntity):
     def __init__(
         self,
         hass: HomeAssistant,
-        config_entry_id: str,
-        device_name: str,
+        config_entry: ConfigEntry,
         source_entity_ids: list[str],
-        upstream_entity: str | None = None,
     ) -> None:
         """Initialize the group utility meter sensor."""
         self.hass = hass
-        self._config_entry_id = config_entry_id
-        self._device_name = device_name
+        self._config_entry = config_entry
         self._source_entity_ids = source_entity_ids
-        self._upstream_entity = upstream_entity
         self._state = 0.0
         self._available = True
-        
         self._unsubscribe_listeners = []
 
     @property
@@ -798,8 +718,8 @@ class PhantomGroupUtilityMeterSensor(SensorEntity, RestoreEntity):
     def device_info(self) -> DeviceInfo:
         """Return device information."""
         return DeviceInfo(
-            identifiers={(DOMAIN, self._config_entry_id)},
-            name=self._device_name,
+            identifiers={(DOMAIN, self._config_entry.entry_id)},
+            name=self._config_entry.title,
             manufacturer="Phantom",
             model="Power Monitor",
             sw_version="1.0.0",
@@ -808,7 +728,7 @@ class PhantomGroupUtilityMeterSensor(SensorEntity, RestoreEntity):
     @property
     def unique_id(self) -> str:
         """Return a unique ID."""
-        return f"{self._config_entry_id}_energy_usage"
+        return f"{self._config_entry.entry_id}_energy_usage"
 
     @property
     def name(self) -> str:
@@ -848,15 +768,13 @@ class PhantomGroupUtilityMeterSensor(SensorEntity, RestoreEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
-        return {
-            "source_entities": self._source_entity_ids,
-        }
+        return {"source_entities": self._source_entity_ids}
 
     async def async_added_to_hass(self) -> None:
         """Run when entity about to be added to hass."""
         await super().async_added_to_hass()
         
-        # Restore state if available
+        # Restore state
         if last_state := await self.async_get_last_state():
             if last_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
                 try:
@@ -864,16 +782,17 @@ class PhantomGroupUtilityMeterSensor(SensorEntity, RestoreEntity):
                 except (ValueError, TypeError):
                     self._state = 0.0
 
-        # Track utility meter entities
-        utility_meter_entity_ids = [
-            f"sensor.{self._config_entry_id}_utility_meter_{entity_id.replace('.', '_')}"
-            for entity_id in self._source_entity_ids
-        ]
+        # Generate utility meter entity IDs to track
+        utility_meter_ids = []
+        for entity_id in self._source_entity_ids:
+            clean_id = entity_id.replace(".", "_")
+            meter_id = f"sensor.{self._config_entry.entry_id}_meter_{clean_id}"
+            utility_meter_ids.append(meter_id)
         
         self._unsubscribe_listeners.append(
             async_track_state_change_event(
                 self.hass,
-                utility_meter_entity_ids,
+                utility_meter_ids,
                 self._async_state_changed,
             )
         )
@@ -894,22 +813,24 @@ class PhantomGroupUtilityMeterSensor(SensorEntity, RestoreEntity):
     async def _async_update_state(self) -> None:
         """Update the group utility meter state."""
         total = 0.0
-        available_meters = 0
+        available_count = 0
         
-        # Sum up individual utility meters
+        # Sum individual utility meters
         for entity_id in self._source_entity_ids:
-            utility_meter_id = f"sensor.{self._config_entry_id}_utility_meter_{entity_id.replace('.', '_')}"
-            state = self.hass.states.get(utility_meter_id)
+            clean_id = entity_id.replace(".", "_")
+            meter_id = f"sensor.{self._config_entry.entry_id}_meter_{clean_id}"
+            state = self.hass.states.get(meter_id)
             
             if state and state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
                 try:
                     value = float(state.state)
                     total += value
-                    available_meters += 1
+                    available_count += 1
                 except (ValueError, TypeError):
+                    _LOGGER.warning("Invalid meter value for %s: %s", meter_id, state.state)
                     continue
         
-        if available_meters > 0:
+        if available_count > 0:
             self._available = True
             self._state = round(total, 3)
         else:
