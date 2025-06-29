@@ -1,6 +1,6 @@
 {
   "domain": "phantom",
-  "name": "Phantom (Power Monitoring)",
+  "name": "Phantom",
   "codeowners": ["@scottpetersen"],
   "config_flow": true,
   "dependencies": [],
