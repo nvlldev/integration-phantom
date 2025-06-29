@@ -16,11 +16,9 @@ from homeassistant.helpers.entity_registry import async_get as async_get_entity_
 
 from .const import (
     CONF_ENERGY_ENTITIES,
-    CONF_GROUP_NAME,
     CONF_POWER_ENTITIES,
     CONF_UPSTREAM_POWER_ENTITY,
     CONF_UPSTREAM_ENERGY_ENTITY,
-    DEFAULT_GROUP_NAME,
     DOMAIN,
 )
 
@@ -106,7 +104,6 @@ class PhantomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         data_schema = vol.Schema(
             {
-                vol.Required(CONF_GROUP_NAME, default=DEFAULT_GROUP_NAME): str,
                 vol.Optional(CONF_POWER_ENTITIES, default=[]): selector.SelectSelector(
                     selector.SelectSelectorConfig(
                         options=power_entities,
@@ -137,12 +134,26 @@ class PhantomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             self._data.update(user_input)
             
-            # Create unique ID based on group name
-            await self.async_set_unique_id(self._data[CONF_GROUP_NAME].lower().replace(" ", "_"))
+            # Create unique ID based on selected entities
+            power_entities = self._data.get(CONF_POWER_ENTITIES, [])
+            energy_entities = self._data.get(CONF_ENERGY_ENTITIES, [])
+            
+            # Use first entity or create generic ID
+            if power_entities:
+                unique_id = f"phantom_{power_entities[0]}"
+                title = f"Phantom ({len(power_entities)} power entities)"
+            elif energy_entities:
+                unique_id = f"phantom_{energy_entities[0]}"
+                title = f"Phantom ({len(energy_entities)} energy entities)"
+            else:
+                unique_id = "phantom_default"
+                title = "Phantom"
+                
+            await self.async_set_unique_id(unique_id)
             self._abort_if_unique_id_configured()
             
             return self.async_create_entry(
-                title=self._data[CONF_GROUP_NAME],
+                title=title,
                 data=self._data,
             )
 
@@ -245,10 +256,6 @@ class PhantomOptionsFlowHandler(config_entries.OptionsFlow):
 
         data_schema = vol.Schema(
             {
-                vol.Required(
-                    CONF_GROUP_NAME, 
-                    default=config.get(CONF_GROUP_NAME, DEFAULT_GROUP_NAME)
-                ): str,
                 vol.Optional(
                     CONF_POWER_ENTITIES, 
                     default=current_power_entities

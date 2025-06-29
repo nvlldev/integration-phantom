@@ -29,11 +29,9 @@ from .const import (
     ATTR_UPSTREAM_POWER_ENTITY,
     ATTR_UPSTREAM_ENERGY_ENTITY,
     CONF_ENERGY_ENTITIES,
-    CONF_GROUP_NAME,
     CONF_POWER_ENTITIES,
     CONF_UPSTREAM_POWER_ENTITY,
     CONF_UPSTREAM_ENERGY_ENTITY,
-    DEFAULT_GROUP_NAME,
     DOMAIN,
 )
 
@@ -54,14 +52,14 @@ async def async_setup_entry(
     energy_entities = config.get(CONF_ENERGY_ENTITIES, [])
     upstream_power_entity = config.get(CONF_UPSTREAM_POWER_ENTITY)
     upstream_energy_entity = config.get(CONF_UPSTREAM_ENERGY_ENTITY)
-    group_name = config.get(CONF_GROUP_NAME, DEFAULT_GROUP_NAME)
+    device_name = config_entry.title
     
     if power_entities:
         entities.append(
             PhantomPowerSensor(
                 hass,
                 config_entry.entry_id,
-                group_name,
+                device_name,
                 power_entities,
                 upstream_power_entity,
             )
@@ -73,7 +71,7 @@ async def async_setup_entry(
                 PhantomPowerRemainderSensor(
                     hass,
                     config_entry.entry_id,
-                    group_name,
+                    device_name,
                     power_entities,
                     upstream_power_entity,
                 )
@@ -84,7 +82,7 @@ async def async_setup_entry(
             PhantomEnergySensor(
                 hass,
                 config_entry.entry_id,
-                group_name,
+                device_name,
                 energy_entities,
                 upstream_energy_entity,
             )
@@ -96,7 +94,7 @@ async def async_setup_entry(
                 PhantomEnergyRemainderSensor(
                     hass,
                     config_entry.entry_id,
-                    group_name,
+                    device_name,
                     energy_entities,
                     upstream_energy_entity,
                 )
@@ -112,14 +110,14 @@ class PhantomBaseSensor(SensorEntity, RestoreEntity):
         self,
         hass: HomeAssistant,
         config_entry_id: str,
-        group_name: str,
+        device_name: str,
         entities: list[str],
         upstream_entity: str | None = None,
     ) -> None:
         """Initialize the sensor."""
         self.hass = hass
         self._config_entry_id = config_entry_id
-        self._group_name = group_name
+        self._device_name = device_name
         self._entities = entities
         self._upstream_entity = upstream_entity
         self._state = None
@@ -138,7 +136,7 @@ class PhantomBaseSensor(SensorEntity, RestoreEntity):
         """Return device information."""
         return DeviceInfo(
             identifiers={(DOMAIN, self._config_entry_id)},
-            name=self._group_name,
+            name=self._device_name,
             manufacturer="Phantom",
             model="Power Monitor",
             sw_version="1.0.0",
@@ -329,14 +327,14 @@ class PhantomRemainderBaseSensor(SensorEntity, RestoreEntity):
         self,
         hass: HomeAssistant,
         config_entry_id: str,
-        group_name: str,
+        device_name: str,
         entities: list[str],
         upstream_entity: str,
     ) -> None:
         """Initialize the remainder sensor."""
         self.hass = hass
         self._config_entry_id = config_entry_id
-        self._group_name = group_name
+        self._device_name = device_name
         self._entities = entities
         self._upstream_entity = upstream_entity
         self._state = None
@@ -358,7 +356,7 @@ class PhantomRemainderBaseSensor(SensorEntity, RestoreEntity):
         """Return device information."""
         return DeviceInfo(
             identifiers={(DOMAIN, self._config_entry_id)},
-            name=self._group_name,
+            name=self._device_name,
             manufacturer="Phantom",
             model="Power Monitor",
             sw_version="1.0.0",

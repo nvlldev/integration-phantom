@@ -3,19 +3,18 @@
     "step": {
       "user": {
         "title": "Setup Phantom Power Monitoring",
-        "description": "Configure your power and energy monitoring groups",
+        "description": "Select power and energy entities to monitor",
         "data": {
-          "group_name": "Group Name",
-          "power_entities": "Power Entities (W)",
-          "energy_entities": "Energy Entities (kWh/Wh)"
+          "power_entities": "Power entities",
+          "energy_entities": "Energy entities"
         }
       },
       "upstream": {
         "title": "Configure Upstream Devices",
-        "description": "Optionally select upstream entities to calculate remainder for {group_name}",
+        "description": "Optionally select upstream entities to calculate remainder",
         "data": {
-          "upstream_power_entity": "Upstream Power Entity (W)",
-          "upstream_energy_entity": "Upstream Energy Entity (kWh/Wh)"
+          "upstream_power_entity": "Upstream power entity",
+          "upstream_energy_entity": "Upstream energy entity"
         }
       }
     },
@@ -23,20 +22,19 @@
       "no_entities_selected": "Please select at least one power or energy entity"
     },
     "abort": {
-      "already_configured": "This group name is already configured"
+      "already_configured": "This configuration is already set up"
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Update Phantom Power Monitoring",
+        "title": "Configure Phantom Power Monitoring",
         "description": "Update your power and energy monitoring configuration",
         "data": {
-          "group_name": "Group Name",
-          "power_entities": "Power Entities (W)",
-          "energy_entities": "Energy Entities (kWh/Wh)",
-          "upstream_power_entity": "Upstream Power Entity (W)",
-          "upstream_energy_entity": "Upstream Energy Entity (kWh/Wh)"
+          "power_entities": "Power entities",
+          "energy_entities": "Energy entities",
+          "upstream_power_entity": "Upstream power entity",
+          "upstream_energy_entity": "Upstream energy entity"
         }
       }
     }

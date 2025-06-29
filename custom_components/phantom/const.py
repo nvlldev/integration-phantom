@@ -6,9 +6,6 @@ CONF_POWER_ENTITIES = "power_entities"
 CONF_ENERGY_ENTITIES = "energy_entities"
 CONF_UPSTREAM_POWER_ENTITY = "upstream_power_entity"
 CONF_UPSTREAM_ENERGY_ENTITY = "upstream_energy_entity"
-CONF_GROUP_NAME = "group_name"
-
-DEFAULT_GROUP_NAME = "Phantom Group"
 
 ATTR_ENTITIES = "entities"
 ATTR_UPSTREAM_POWER_ENTITY = "upstream_power_entity"

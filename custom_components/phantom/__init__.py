@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.typing import ConfigType
 
-from .const import CONF_GROUP_NAME, DEFAULT_GROUP_NAME, DOMAIN
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,12 +36,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Create device registry entry
     device_registry = dr.async_get(hass)
-    group_name = config.get(CONF_GROUP_NAME, DEFAULT_GROUP_NAME)
     
     device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, entry.entry_id)},
-        name=group_name,
+        name=entry.title,
         manufacturer="Phantom",
         model="Power Monitor",
         sw_version="1.0.0",
