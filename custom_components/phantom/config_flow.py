@@ -41,12 +41,12 @@ def _get_power_entities(hass: HomeAssistant) -> list[str]:
             entities.append(entity_id)
     
     # Also check current states for entities that might not be in registry
-    for entity_id, state in hass.states.async_all("sensor"):
+    for state in hass.states.async_all("sensor"):
         if (
-            entity_id not in entities
+            state.entity_id not in entities
             and state.attributes.get("device_class") == "power"
         ):
-            entities.append(entity_id)
+            entities.append(state.entity_id)
     
     return sorted(entities)
 
@@ -65,12 +65,12 @@ def _get_energy_entities(hass: HomeAssistant) -> list[str]:
             entities.append(entity_id)
     
     # Also check current states for entities that might not be in registry
-    for entity_id, state in hass.states.async_all("sensor"):
+    for state in hass.states.async_all("sensor"):
         if (
-            entity_id not in entities
+            state.entity_id not in entities
             and state.attributes.get("device_class") == "energy"
         ):
-            entities.append(entity_id)
+            entities.append(state.entity_id)
     
     return sorted(entities)
 
