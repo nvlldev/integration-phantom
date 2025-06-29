@@ -1,0 +1,12 @@
+{
+  "domain": "phantom",
+  "name": "Phantom (Power Monitoring)",
+  "codeowners": ["@scottpetersen"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/scottpetersen/phantom",
+  "integration_type": "helper",
+  "iot_class": "calculated",
+  "requirements": [],
+  "version": "1.0.0"
+}

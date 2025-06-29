@@ -1,0 +1,44 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Setup Phantom Power Monitoring",
+        "description": "Configure your power and energy monitoring groups",
+        "data": {
+          "group_name": "Group Name",
+          "power_entities": "Power Entities (W)",
+          "energy_entities": "Energy Entities (kWh/Wh)"
+        }
+      },
+      "upstream": {
+        "title": "Configure Upstream Devices",
+        "description": "Optionally select upstream entities to calculate remainder for {group_name}",
+        "data": {
+          "upstream_power_entity": "Upstream Power Entity (W)",
+          "upstream_energy_entity": "Upstream Energy Entity (kWh/Wh)"
+        }
+      }
+    },
+    "error": {
+      "no_entities_selected": "Please select at least one power or energy entity"
+    },
+    "abort": {
+      "already_configured": "This group name is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Update Phantom Power Monitoring",
+        "description": "Update your power and energy monitoring configuration",
+        "data": {
+          "group_name": "Group Name",
+          "power_entities": "Power Entities (W)",
+          "energy_entities": "Energy Entities (kWh/Wh)",
+          "upstream_power_entity": "Upstream Power Entity (W)",
+          "upstream_energy_entity": "Upstream Energy Entity (kWh/Wh)"
+        }
+      }
+    }
+  }
+}
