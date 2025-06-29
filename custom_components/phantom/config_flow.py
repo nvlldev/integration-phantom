@@ -25,10 +25,10 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
-def _get_power_entities(hass: HomeAssistant) -> list[str]:
-    """Get all power sensor entities."""
+def _get_power_entities(hass: HomeAssistant) -> dict[str, str]:
+    """Get all power sensor entities with their friendly names."""
     entity_registry = async_get_entity_registry(hass)
-    entities = []
+    entities = {}
     
     for entity_id, entry in entity_registry.entities.items():
         if (
@@ -36,7 +36,10 @@ def _get_power_entities(hass: HomeAssistant) -> list[str]:
             and entry.device_class == "power"
             and not entry.disabled_by
         ):
-            entities.append(entity_id)
+            # Get friendly name from state or use entity name
+            state = hass.states.get(entity_id)
+            friendly_name = state.attributes.get("friendly_name", entity_id) if state else entity_id
+            entities[entity_id] = friendly_name
     
     # Also check current states for entities that might not be in registry
     for state in hass.states.async_all("sensor"):
@@ -44,15 +47,16 @@ def _get_power_entities(hass: HomeAssistant) -> list[str]:
             state.entity_id not in entities
             and state.attributes.get("device_class") == "power"
         ):
-            entities.append(state.entity_id)
+            friendly_name = state.attributes.get("friendly_name", state.entity_id)
+            entities[state.entity_id] = friendly_name
     
-    return sorted(entities)
+    return entities
 
 
-def _get_energy_entities(hass: HomeAssistant) -> list[str]:
-    """Get all energy sensor entities."""
+def _get_energy_entities(hass: HomeAssistant) -> dict[str, str]:
+    """Get all energy sensor entities with their friendly names."""
     entity_registry = async_get_entity_registry(hass)
-    entities = []
+    entities = {}
     
     for entity_id, entry in entity_registry.entities.items():
         if (
@@ -60,7 +64,10 @@ def _get_energy_entities(hass: HomeAssistant) -> list[str]:
             and entry.device_class == "energy"
             and not entry.disabled_by
         ):
-            entities.append(entity_id)
+            # Get friendly name from state or use entity name
+            state = hass.states.get(entity_id)
+            friendly_name = state.attributes.get("friendly_name", entity_id) if state else entity_id
+            entities[entity_id] = friendly_name
     
     # Also check current states for entities that might not be in registry
     for state in hass.states.async_all("sensor"):
@@ -68,9 +75,10 @@ def _get_energy_entities(hass: HomeAssistant) -> list[str]:
             state.entity_id not in entities
             and state.attributes.get("device_class") == "energy"
         ):
-            entities.append(state.entity_id)
+            friendly_name = state.attributes.get("friendly_name", state.entity_id)
+            entities[state.entity_id] = friendly_name
     
-    return sorted(entities)
+    return entities
 
 
 class PhantomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -99,21 +107,32 @@ class PhantomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._data.update(user_input)
                 return await self.async_step_upstream()
 
-        power_entities = _get_power_entities(self.hass)
-        energy_entities = _get_energy_entities(self.hass)
+        power_entities_dict = _get_power_entities(self.hass)
+        energy_entities_dict = _get_energy_entities(self.hass)
+
+        # Create selector options with value (entity_id) and label (friendly_name)
+        power_options = [
+            selector.SelectOptionDict(value=entity_id, label=friendly_name)
+            for entity_id, friendly_name in sorted(power_entities_dict.items(), key=lambda x: x[1])
+        ]
+        
+        energy_options = [
+            selector.SelectOptionDict(value=entity_id, label=friendly_name)
+            for entity_id, friendly_name in sorted(energy_entities_dict.items(), key=lambda x: x[1])
+        ]
 
         data_schema = vol.Schema(
             {
                 vol.Optional(CONF_POWER_ENTITIES, default=[]): selector.SelectSelector(
                     selector.SelectSelectorConfig(
-                        options=power_entities,
+                        options=power_options,
                         multiple=True,
                         mode=selector.SelectSelectorMode.DROPDOWN,
                     ),
                 ),
                 vol.Optional(CONF_ENERGY_ENTITIES, default=[]): selector.SelectSelector(
                     selector.SelectSelectorConfig(
-                        options=energy_entities,
+                        options=energy_options,
                         multiple=True,
                         mode=selector.SelectSelectorMode.DROPDOWN,
                     ),    
@@ -163,10 +182,11 @@ class PhantomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Add upstream power entity selection if power entities are configured
         power_entities_configured = self._data.get(CONF_POWER_ENTITIES, [])
         if power_entities_configured:
-            all_power_entities = _get_power_entities(self.hass)
+            all_power_entities_dict = _get_power_entities(self.hass)
             upstream_power_options = [
-                entity for entity in all_power_entities 
-                if entity not in power_entities_configured
+                selector.SelectOptionDict(value=entity_id, label=friendly_name)
+                for entity_id, friendly_name in sorted(all_power_entities_dict.items(), key=lambda x: x[1])
+                if entity_id not in power_entities_configured
             ]
             schema_dict[vol.Optional(CONF_UPSTREAM_POWER_ENTITY)] = selector.SelectSelector(
                 selector.SelectSelectorConfig(
@@ -178,10 +198,11 @@ class PhantomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Add upstream energy entity selection if energy entities are configured
         energy_entities_configured = self._data.get(CONF_ENERGY_ENTITIES, [])
         if energy_entities_configured:
-            all_energy_entities = _get_energy_entities(self.hass)
+            all_energy_entities_dict = _get_energy_entities(self.hass)
             upstream_energy_options = [
-                entity for entity in all_energy_entities 
-                if entity not in energy_entities_configured
+                selector.SelectOptionDict(value=entity_id, label=friendly_name)
+                for entity_id, friendly_name in sorted(all_energy_entities_dict.items(), key=lambda x: x[1])
+                if entity_id not in energy_entities_configured
             ]
             schema_dict[vol.Optional(CONF_UPSTREAM_ENERGY_ENTITY)] = selector.SelectSelector(
                 selector.SelectSelectorConfig(
@@ -230,8 +251,8 @@ class PhantomOptionsFlowHandler(config_entries.OptionsFlow):
             else:
                 return self.async_create_entry(title="", data=user_input)
 
-        power_entities = _get_power_entities(self.hass)
-        energy_entities = _get_energy_entities(self.hass)
+        power_entities_dict = _get_power_entities(self.hass)
+        energy_entities_dict = _get_energy_entities(self.hass)
 
         # Get current values from both data and options (options take precedence)
         config = {**self.config_entry.data}
@@ -243,15 +264,28 @@ class PhantomOptionsFlowHandler(config_entries.OptionsFlow):
         current_upstream_power = config.get(CONF_UPSTREAM_POWER_ENTITY)
         current_upstream_energy = config.get(CONF_UPSTREAM_ENERGY_ENTITY)
 
+        # Create selector options
+        power_options = [
+            selector.SelectOptionDict(value=entity_id, label=friendly_name)
+            for entity_id, friendly_name in sorted(power_entities_dict.items(), key=lambda x: x[1])
+        ]
+        
+        energy_options = [
+            selector.SelectOptionDict(value=entity_id, label=friendly_name)
+            for entity_id, friendly_name in sorted(energy_entities_dict.items(), key=lambda x: x[1])
+        ]
+
         # Remove currently selected entities from upstream options
         upstream_power_options = [
-            entity for entity in power_entities 
-            if entity not in current_power_entities
+            selector.SelectOptionDict(value=entity_id, label=friendly_name)
+            for entity_id, friendly_name in sorted(power_entities_dict.items(), key=lambda x: x[1])
+            if entity_id not in current_power_entities
         ]
         
         upstream_energy_options = [
-            entity for entity in energy_entities 
-            if entity not in current_energy_entities
+            selector.SelectOptionDict(value=entity_id, label=friendly_name)
+            for entity_id, friendly_name in sorted(energy_entities_dict.items(), key=lambda x: x[1])
+            if entity_id not in current_energy_entities
         ]
 
         data_schema = vol.Schema(
@@ -261,7 +295,7 @@ class PhantomOptionsFlowHandler(config_entries.OptionsFlow):
                     default=current_power_entities
                 ): selector.SelectSelector(
                     selector.SelectSelectorConfig(
-                        options=power_entities,
+                        options=power_options,
                         multiple=True,
                         mode=selector.SelectSelectorMode.DROPDOWN,
                     ),
@@ -271,7 +305,7 @@ class PhantomOptionsFlowHandler(config_entries.OptionsFlow):
                     default=current_energy_entities
                 ): selector.SelectSelector(
                     selector.SelectSelectorConfig(
-                        options=energy_entities,
+                        options=energy_options,
                         multiple=True,
                         mode=selector.SelectSelectorMode.DROPDOWN,
                     ),
