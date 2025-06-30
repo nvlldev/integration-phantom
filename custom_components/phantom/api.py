@@ -194,6 +194,7 @@ def ws_save_config(
     old_data = dict(hass.data[DOMAIN][config_entry.entry_id])
     
     # Save current states BEFORE any configuration changes
+    _LOGGER.info("Saving current entity states before configuration update...")
     saved_states = save_current_states_for_migration(hass, config_entry.entry_id)
     
     # Create migration mapping for renamed groups
@@ -202,6 +203,7 @@ def ws_save_config(
     # Store migration data if any renames were detected
     if migration_mapping:
         store_migration_data(hass, config_entry.entry_id, migration_mapping)
+        _LOGGER.info("Stored migration data for group renames")
     
     # Update config entry
     hass.config_entries.async_update_entry(config_entry, data=new_data)
@@ -221,6 +223,6 @@ def ws_save_config(
     # Send success response
     connection.send_result(msg["id"], {"success": True})
     
-    # Just reload the integration - no cleanup needed
+    # Always reload to apply configuration changes
     _LOGGER.info("Configuration saved, reloading integration")
     hass.async_create_task(hass.config_entries.async_reload(config_entry.entry_id))

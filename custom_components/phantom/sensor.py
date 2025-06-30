@@ -581,6 +581,7 @@ class PhantomUtilityMeterSensor(PhantomBaseSensor, RestoreEntity):
     async def async_added_to_hass(self) -> None:
         """Handle entity added to hass."""
         # Check for migrated state first (from rename)
+        _LOGGER.debug("Checking for migrated state for %s (unique_id: %s)", self._device_name, self._attr_unique_id)
         migrated_state = get_migrated_state(self._hass, self._config_entry_id, self._attr_unique_id)
         
         if migrated_state:
@@ -591,15 +592,17 @@ class PhantomUtilityMeterSensor(PhantomBaseSensor, RestoreEntity):
                 if "last_value" in migrated_state.get("attributes", {}):
                     self._last_value = float(migrated_state["attributes"]["last_value"])
                 _LOGGER.info(
-                    "Restored migrated state for %s: %s kWh (from rename)",
+                    "✓ Restored migrated state for %s: %s kWh (from old entity: %s)",
                     self._device_name,
-                    self._total_consumed
+                    self._total_consumed,
+                    migrated_state.get("old_entity_id", "unknown")
                 )
             except (ValueError, TypeError) as e:
                 _LOGGER.warning("Failed to restore migrated state: %s", e)
                 self._total_consumed = 0.0
                 self._attr_native_value = 0.0
         else:
+            _LOGGER.debug("No migrated state found for %s", self._device_name)
             # Try to restore from previous state (normal restart)
             if (last_state := await self.async_get_last_state()) is not None:
                 if last_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
@@ -783,6 +786,7 @@ class PhantomUpstreamEnergyMeterSensor(PhantomBaseSensor, RestoreEntity):
     async def async_added_to_hass(self) -> None:
         """Handle entity added to hass."""
         # Check for migrated state first (from rename)
+        _LOGGER.debug("Checking for migrated state for upstream energy (unique_id: %s)", self._attr_unique_id)
         migrated_state = get_migrated_state(self._hass, self._config_entry_id, self._attr_unique_id)
         
         if migrated_state:
@@ -793,14 +797,16 @@ class PhantomUpstreamEnergyMeterSensor(PhantomBaseSensor, RestoreEntity):
                 if "last_value" in migrated_state.get("attributes", {}):
                     self._last_value = float(migrated_state["attributes"]["last_value"])
                 _LOGGER.info(
-                    "Restored migrated upstream energy: %s kWh (from rename)",
-                    self._total_consumed
+                    "✓ Restored migrated upstream energy: %s kWh (from old entity: %s)",
+                    self._total_consumed,
+                    migrated_state.get("old_entity_id", "unknown")
                 )
             except (ValueError, TypeError) as e:
                 _LOGGER.warning("Failed to restore migrated state: %s", e)
                 self._total_consumed = 0.0
                 self._attr_native_value = 0.0
         else:
+            _LOGGER.debug("No migrated state found for upstream energy")
             # Try to restore from previous state (normal restart)
             if (last_state := await self.async_get_last_state()) is not None:
                 if last_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
