@@ -77,6 +77,7 @@ def ws_save_config(
     msg: dict[str, Any],
 ) -> None:
     """Save Phantom configuration."""
+    _LOGGER.debug("Received save_config request: %s", msg)
     # Find the Phantom config entry
     config_entry = None
     for entry in hass.config_entries.async_entries(DOMAIN):
@@ -133,4 +134,12 @@ def ws_save_config(
     
     _LOGGER.info("Phantom configuration updated: %d devices configured", len(valid_devices))
     
+    # Send success response
     connection.send_result(msg["id"], {"success": True})
+    
+    # Schedule a reload after sending the response
+    async def _reload():
+        """Reload the integration with new config."""
+        await hass.config_entries.async_reload(config_entry.entry_id)
+    
+    hass.async_create_task(_reload())

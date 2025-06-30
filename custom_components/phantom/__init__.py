@@ -57,8 +57,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     
-    # Add options update listener
-    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
+    # Don't add update listener - we'll handle reloads manually
     
     return True
 
