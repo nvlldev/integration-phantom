@@ -12,6 +12,7 @@ from homeassistant.helpers.typing import ConfigType
 
 from .api import async_setup_api
 from .const import DOMAIN
+from .device_cleanup import async_cleanup_devices_and_entities
 from .panel import async_register_panel
 
 _LOGGER = logging.getLogger(__name__)
@@ -53,6 +54,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     # Register custom panel
     await async_register_panel(hass)
+    
+    # Clean up old devices/entities before setting up new ones
+    await async_cleanup_devices_and_entities(hass, entry.entry_id, config)
 
     # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

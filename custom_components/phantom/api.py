@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.typing import ConfigType
 
 from .const import CONF_DEVICES, CONF_UPSTREAM_POWER_ENTITY, CONF_UPSTREAM_ENERGY_ENTITY, CONF_GROUPS, CONF_GROUP_NAME, DOMAIN
+from .device_cleanup import async_cleanup_devices_and_entities
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -175,9 +176,12 @@ def ws_save_config(
     # Send success response
     connection.send_result(msg["id"], {"success": True})
     
-    # Schedule a reload after sending the response
-    async def _reload():
-        """Reload the integration with new config."""
+    # Schedule cleanup and reload after sending the response
+    async def _cleanup_and_reload():
+        """Clean up old devices and reload the integration with new config."""
+        # First clean up devices/entities that no longer exist
+        await async_cleanup_devices_and_entities(hass, config_entry.entry_id, new_data)
+        # Then reload the integration
         await hass.config_entries.async_reload(config_entry.entry_id)
     
-    hass.async_create_task(_reload())
+    hass.async_create_task(_cleanup_and_reload())

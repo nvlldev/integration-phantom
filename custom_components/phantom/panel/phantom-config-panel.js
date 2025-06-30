@@ -380,6 +380,10 @@ class PhantomConfigPanel extends HTMLElement {
           </button>
           <input class="group-name-input" value="${group.name}" placeholder="Group name">
         </div>
+        
+        <div style="background: var(--info-color, #039be5); color: white; padding: 12px; border-radius: 4px; margin-bottom: 16px; font-size: 14px;">
+          <strong>Note:</strong> Renaming a group will create new sensors and remove the old ones. Entity history will be preserved in the database but won't be associated with the new sensors.
+        </div>
 
         <div class="section">
           <h2>Devices (${group.devices.length})</h2>
