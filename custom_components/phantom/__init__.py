@@ -67,11 +67,11 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     # Register static path for panel files
     panel_dir = hass.config.path("custom_components/phantom/panel")
     hass.http.register_static_path(
-        "/local/phantom", 
+        "/phantom-static", 
         panel_dir,
         True
     )
-    _LOGGER.info("Registered static path for panel files: %s -> /local/phantom", panel_dir)
+    _LOGGER.info("Registered static path for panel files: %s -> /phantom-static", panel_dir)
     
     # Create a simple HTML wrapper that loads our component
     wrapper_html = """<!DOCTYPE html>
@@ -84,7 +84,7 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
 </head>
 <body>
     <phantom-panel></phantom-panel>
-    <script type="module" src="/local/phantom/phantom-panel.js"></script>
+    <script type="module" src="/phantom-static/phantom-panel.js"></script>
     <script>
         // Wait for Home Assistant to load and pass hass object
         window.addEventListener('message', (event) => {
@@ -123,7 +123,7 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     _LOGGER.info("    sidebar_title: Phantom")
     _LOGGER.info("    sidebar_icon: mdi:flash")
     _LOGGER.info("    url_path: phantom")
-    _LOGGER.info("    module_url: /local/phantom/phantom-panel.js")
+    _LOGGER.info("    module_url: /phantom-static/phantom-panel.js")
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
