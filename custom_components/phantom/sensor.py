@@ -899,7 +899,7 @@ class PhantomPowerRemainderSensor(PhantomBaseSensor):
     _attr_device_class = SensorDeviceClass.POWER
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_icon = "mdi:flash-alert"
+    _attr_icon = "mdi:flash-outline"
     
     def __init__(
         self,

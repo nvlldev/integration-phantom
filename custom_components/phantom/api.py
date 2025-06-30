@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.typing import ConfigType
 
 from .const import CONF_DEVICES, CONF_UPSTREAM_POWER_ENTITY, CONF_UPSTREAM_ENERGY_ENTITY, CONF_GROUPS, CONF_GROUP_NAME, DOMAIN
-from .state_migration import async_save_states_before_reload
+from .state_migration import save_current_states_for_migration, create_migration_mapping, store_migration_data
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -193,10 +193,15 @@ def ws_save_config(
     # Get old configuration before updating
     old_data = dict(hass.data[DOMAIN][config_entry.entry_id])
     
-    # Save states before reload for migration
-    hass.async_create_task(
-        async_save_states_before_reload(hass, config_entry.entry_id, old_data, new_data)
-    )
+    # Save current states BEFORE any configuration changes
+    saved_states = save_current_states_for_migration(hass, config_entry.entry_id)
+    
+    # Create migration mapping for renamed groups
+    migration_mapping = create_migration_mapping(old_data, new_data, config_entry.entry_id, saved_states)
+    
+    # Store migration data if any renames were detected
+    if migration_mapping:
+        store_migration_data(hass, config_entry.entry_id, migration_mapping)
     
     # Update config entry
     hass.config_entries.async_update_entry(config_entry, data=new_data)

@@ -21,76 +21,106 @@ def _sanitize_name(name: str) -> str:
     return name.lower().replace(" ", "_").replace("-", "_")
 
 
-async def async_save_states_before_reload(
+def save_current_states_for_migration(
     hass: HomeAssistant,
     config_entry_id: str,
-    old_config: dict[str, Any],
-    new_config: dict[str, Any],
-) -> None:
-    """Save utility meter states before reload for migration."""
+) -> dict[str, Any]:
+    """Save all current utility meter states and their entity IDs."""
+    saved_states = {}
     entity_registry = er.async_get(hass)
     
-    # Initialize storage
-    if MIGRATION_STORAGE_KEY not in hass.data:
-        hass.data[MIGRATION_STORAGE_KEY] = {}
-    
-    migration_data = {}
-    
-    # Compare old and new configs to find renamed groups
-    old_groups = {}
-    new_groups = {}
-    
-    # Build old groups map
-    if CONF_GROUPS in old_config:
-        for idx, group in enumerate(old_config[CONF_GROUPS]):
-            group_name = group.get(CONF_GROUP_NAME, "")
-            if group_name:
-                old_groups[idx] = {
-                    "name": group_name,
-                    "devices": group.get(CONF_DEVICES, [])
+    # Find all phantom utility meter entities for this config entry
+    for entity_id, entry in entity_registry.entities.items():
+        if (entry.platform == DOMAIN and 
+            entry.config_entry_id == config_entry_id and
+            ("utility_meter" in entry.unique_id or "energy_meter" in entry.unique_id)):
+            
+            state = hass.states.get(entity_id)
+            if state and state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                # Store state with both entity_id and unique_id for easy lookup
+                saved_states[entity_id] = {
+                    "state": state.state,
+                    "attributes": dict(state.attributes),
+                    "unique_id": entry.unique_id,
                 }
-                _LOGGER.debug(f"Old group {idx}: {group_name}")
+                _LOGGER.debug(
+                    "Saved state for %s (unique_id: %s): %s",
+                    entity_id,
+                    entry.unique_id,
+                    state.state
+                )
     
-    # Build new groups map
-    if CONF_GROUPS in new_config:
-        for idx, group in enumerate(new_config[CONF_GROUPS]):
-            group_name = group.get(CONF_GROUP_NAME, "")
-            if group_name:
-                new_groups[idx] = {
-                    "name": group_name,
-                    "devices": group.get(CONF_DEVICES, [])
-                }
-                _LOGGER.debug(f"New group {idx}: {group_name}")
+    _LOGGER.info("Saved %d utility meter states for potential migration", len(saved_states))
+    return saved_states
+
+
+def create_migration_mapping(
+    old_config: dict[str, Any],
+    new_config: dict[str, Any],
+    config_entry_id: str,
+    saved_states: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Create a mapping of old entity IDs to new entity IDs for renamed groups."""
+    migration_mapping = {}
+    
+    # Get groups from configs
+    old_groups = {group.get(CONF_GROUP_NAME): group for group in old_config.get(CONF_GROUPS, [])}
+    new_groups = {group.get(CONF_GROUP_NAME): group for group in new_config.get(CONF_GROUPS, [])}
     
     # Find renamed groups by comparing device configurations
-    _LOGGER.debug(f"Comparing {len(old_groups)} old groups with {len(new_groups)} new groups")
-    for old_idx, old_group in old_groups.items():
-        for new_idx, new_group in new_groups.items():
-            # Check if groups have the same devices (indicating a rename)
-            same_devices = _groups_have_same_devices(old_group["devices"], new_group["devices"])
-            _LOGGER.debug(f"Comparing '{old_group['name']}' with '{new_group['name']}': same_devices={same_devices}")
-            if (old_group["name"] != new_group["name"] and same_devices):
+    for old_name, old_group in old_groups.items():
+        for new_name, new_group in new_groups.items():
+            if old_name != new_name and _groups_have_same_devices(
+                old_group.get(CONF_DEVICES, []), 
+                new_group.get(CONF_DEVICES, [])
+            ):
+                _LOGGER.info("Detected group rename: '%s' -> '%s'", old_name, new_name)
                 
-                _LOGGER.info(
-                    "Detected group rename: '%s' -> '%s'",
-                    old_group["name"],
-                    new_group["name"]
-                )
+                # Create mappings for all utility meters in this group
+                for device in old_group.get(CONF_DEVICES, []):
+                    device_name = device.get("name", "")
+                    if device_name and device.get("energy_entity"):
+                        old_unique_id = f"{config_entry_id}_{_sanitize_name(old_name)}_utility_meter_{_sanitize_name(device_name)}"
+                        new_unique_id = f"{config_entry_id}_{_sanitize_name(new_name)}_utility_meter_{_sanitize_name(device_name)}"
+                        
+                        # Find the old entity ID from saved states
+                        for entity_id, state_data in saved_states.items():
+                            if state_data["unique_id"] == old_unique_id:
+                                migration_mapping[old_unique_id] = {
+                                    "old_entity_id": entity_id,
+                                    "new_unique_id": new_unique_id,
+                                    "state": state_data["state"],
+                                    "attributes": state_data["attributes"],
+                                }
+                                _LOGGER.debug(
+                                    "Migration mapping: %s -> %s (state: %s)",
+                                    entity_id,
+                                    new_unique_id,
+                                    state_data["state"]
+                                )
+                                break
                 
-                # Save states for this group's entities
-                await _save_group_states(
-                    hass,
-                    config_entry_id,
-                    old_group["name"],
-                    new_group["name"],
-                    old_group["devices"],
-                    migration_data
-                )
+                # Map upstream energy meter if it exists
+                old_upstream_id = f"{config_entry_id}_{_sanitize_name(old_name)}_upstream_energy_meter"
+                new_upstream_id = f"{config_entry_id}_{_sanitize_name(new_name)}_upstream_energy_meter"
+                
+                for entity_id, state_data in saved_states.items():
+                    if state_data["unique_id"] == old_upstream_id:
+                        migration_mapping[old_upstream_id] = {
+                            "old_entity_id": entity_id,
+                            "new_unique_id": new_upstream_id,
+                            "state": state_data["state"],
+                            "attributes": state_data["attributes"],
+                        }
+                        _LOGGER.debug(
+                            "Migration mapping (upstream): %s -> %s (state: %s)",
+                            entity_id,
+                            new_upstream_id,
+                            state_data["state"]
+                        )
+                        break
     
-    # Store migration data
-    if migration_data:
-        hass.data[MIGRATION_STORAGE_KEY][config_entry_id] = migration_data
-        _LOGGER.info("Saved %d entity states for migration", len(migration_data))
+    return migration_mapping
 
 
 def _groups_have_same_devices(devices1: list[dict], devices2: list[dict]) -> bool:
@@ -99,84 +129,40 @@ def _groups_have_same_devices(devices1: list[dict], devices2: list[dict]) -> boo
         return False
     
     # Create sets of device configurations for comparison
-    dev1_set = set()
-    for dev in devices1:
-        # Use tuple of relevant fields for comparison
-        dev1_set.add((
-            dev.get("name", ""),
-            dev.get("power_entity", ""),
-            dev.get("energy_entity", "")
-        ))
+    dev1_set = {
+        (dev.get("name", ""), dev.get("power_entity", ""), dev.get("energy_entity", ""))
+        for dev in devices1
+    }
     
-    dev2_set = set()
-    for dev in devices2:
-        dev2_set.add((
-            dev.get("name", ""),
-            dev.get("power_entity", ""),
-            dev.get("energy_entity", "")
-        ))
+    dev2_set = {
+        (dev.get("name", ""), dev.get("power_entity", ""), dev.get("energy_entity", ""))
+        for dev in devices2
+    }
     
     return dev1_set == dev2_set
 
 
-async def _save_group_states(
+def store_migration_data(
     hass: HomeAssistant,
     config_entry_id: str,
-    old_group_name: str,
-    new_group_name: str,
-    devices: list[dict],
-    migration_data: dict[str, Any],
+    migration_mapping: dict[str, dict[str, Any]],
 ) -> None:
-    """Save states for a group's entities."""
-    # Save utility meter states
-    for device in devices:
-        device_name = device.get("name", "")
-        if device_name and device.get("energy_entity"):
-            # Old unique ID
-            old_unique_id = f"{config_entry_id}_{_sanitize_name(old_group_name)}_utility_meter_{_sanitize_name(device_name)}"
-            # New unique ID
-            new_unique_id = f"{config_entry_id}_{_sanitize_name(new_group_name)}_utility_meter_{_sanitize_name(device_name)}"
-            
-            # Find entity by unique ID
-            entity_id = None
-            entity_registry = er.async_get(hass)
-            for ent_id, entry in entity_registry.entities.items():
-                if entry.unique_id == old_unique_id and entry.platform == DOMAIN:
-                    entity_id = ent_id
-                    break
-            
-            if entity_id:
-                state = hass.states.get(entity_id)
-                if state and state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-                    migration_data[new_unique_id] = {
-                        "state": state.state,
-                        "attributes": dict(state.attributes),
-                        "old_entity_id": entity_id,
-                    }
-                    _LOGGER.debug(
-                        "Saved state for %s: %s -> %s",
-                        device_name,
-                        old_unique_id,
-                        new_unique_id
-                    )
+    """Store migration data in hass.data."""
+    if MIGRATION_STORAGE_KEY not in hass.data:
+        hass.data[MIGRATION_STORAGE_KEY] = {}
     
-    # Save upstream energy meter state
-    old_upstream_id = f"{config_entry_id}_{_sanitize_name(old_group_name)}_upstream_energy_meter"
-    new_upstream_id = f"{config_entry_id}_{_sanitize_name(new_group_name)}_upstream_energy_meter"
+    # Convert to lookup by new unique ID for easier access during restore
+    migration_by_new_id = {}
+    for old_unique_id, mapping in migration_mapping.items():
+        new_unique_id = mapping["new_unique_id"]
+        migration_by_new_id[new_unique_id] = {
+            "state": mapping["state"],
+            "attributes": mapping["attributes"],
+            "old_entity_id": mapping["old_entity_id"],
+        }
     
-    # Find upstream entity
-    entity_registry = er.async_get(hass)
-    for entity_id, entry in entity_registry.entities.items():
-        if entry.unique_id == old_upstream_id and entry.platform == DOMAIN:
-            state = hass.states.get(entity_id)
-            if state and state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-                migration_data[new_upstream_id] = {
-                    "state": state.state,
-                    "attributes": dict(state.attributes),
-                    "old_entity_id": entity_id,
-                }
-                _LOGGER.debug("Saved upstream energy meter state")
-            break
+    hass.data[MIGRATION_STORAGE_KEY][config_entry_id] = migration_by_new_id
+    _LOGGER.info("Stored migration data for %d entities", len(migration_by_new_id))
 
 
 def get_migrated_state(hass: HomeAssistant, config_entry_id: str, unique_id: str) -> dict[str, Any] | None:
