@@ -881,7 +881,13 @@ class PhantomUpstreamEnergyMeterSensor(SensorEntity, RestoreEntity):
             upstream_state = self.hass.states.get(self._upstream_entity_id)
             if upstream_state and upstream_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
                 try:
-                    self._baseline_value = float(upstream_state.state)
+                    baseline_value = float(upstream_state.state)
+                    # Check unit of measurement and convert if needed
+                    source_unit = upstream_state.attributes.get("unit_of_measurement", "").lower()
+                    if source_unit in ["wh", "w·h", "w-h"]:
+                        # Convert Wh to kWh
+                        baseline_value = baseline_value / 1000.0
+                    self._baseline_value = baseline_value
                     self._last_source_value = self._baseline_value
                 except (ValueError, TypeError):
                     self._baseline_value = 0.0
@@ -922,6 +928,12 @@ class PhantomUpstreamEnergyMeterSensor(SensorEntity, RestoreEntity):
         
         try:
             current_value = float(upstream_state.state)
+            
+            # Check unit of measurement and convert if needed
+            source_unit = upstream_state.attributes.get("unit_of_measurement", "").lower()
+            if source_unit in ["wh", "w·h", "w-h"]:
+                # Convert Wh to kWh
+                current_value = current_value / 1000.0
             
             # Detect reset (significant decrease)
             if (self._last_source_value is not None and 
@@ -1049,17 +1061,22 @@ class PhantomEnergyRemainderSensor(PhantomRemainderBaseSensor):
         group_total = 0.0
         group_available = 0
         
+        _LOGGER.debug("Energy remainder update - checking %d entities", len(self._entities))
+        
         for entity_id in self._entities:
             # Get the utility meter for this entity
             clean_id = entity_id.replace(".", "_")
             meter_id = f"sensor.{self._config_entry.entry_id}_meter_{clean_id}"
             state = self.hass.states.get(meter_id)
             
+            _LOGGER.debug("Checking utility meter %s: %s", meter_id, state.state if state else "Not found")
+            
             if state and state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
                 try:
                     value = float(state.state)
                     group_total += value
                     group_available += 1
+                    _LOGGER.debug("Added %f from %s to group total", value, meter_id)
                 except (ValueError, TypeError):
                     _LOGGER.warning("Invalid utility meter value for %s: %s", meter_id, state.state)
                     continue
@@ -1070,12 +1087,17 @@ class PhantomEnergyRemainderSensor(PhantomRemainderBaseSensor):
         upstream_value = None
         upstream_available = False
         
+        _LOGGER.debug("Checking upstream meter %s: %s", upstream_meter_id, upstream_state.state if upstream_state else "Not found")
+        
         if upstream_state and upstream_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
             try:
                 upstream_value = float(upstream_state.state)
                 upstream_available = True
+                _LOGGER.debug("Upstream meter value: %f", upstream_value)
             except (ValueError, TypeError):
                 _LOGGER.warning("Invalid upstream meter value for %s: %s", upstream_meter_id, upstream_state.state)
+        
+        _LOGGER.debug("Energy remainder: group_available=%d, upstream_available=%s", group_available, upstream_available)
         
         # Remainder sensor is only available if BOTH conditions are met:
         # 1. At least one group utility meter is available
@@ -1084,10 +1106,13 @@ class PhantomEnergyRemainderSensor(PhantomRemainderBaseSensor):
             self._available = True
             remainder = upstream_value - group_total
             self._state = round(remainder, 3)
+            _LOGGER.debug("Energy remainder calculated: %f", self._state)
         else:
             # Either no group meters or no upstream meter - sensor unavailable
             self._available = False
             self._state = None
+            _LOGGER.debug("Energy remainder unavailable - group_available=%d, upstream_available=%s", 
+                         group_available, upstream_available)
         
         self.async_write_ha_state()
 
@@ -1236,7 +1261,13 @@ class PhantomUtilityMeterSensor(SensorEntity, RestoreEntity):
             source_state = self.hass.states.get(self._source_entity_id)
             if source_state and source_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
                 try:
-                    self._baseline_value = float(source_state.state)
+                    baseline_value = float(source_state.state)
+                    # Check unit of measurement and convert if needed
+                    source_unit = source_state.attributes.get("unit_of_measurement", "").lower()
+                    if source_unit in ["wh", "w·h", "w-h"]:
+                        # Convert Wh to kWh
+                        baseline_value = baseline_value / 1000.0
+                    self._baseline_value = baseline_value
                     self._last_source_value = self._baseline_value
                 except (ValueError, TypeError):
                     self._baseline_value = 0.0
@@ -1277,6 +1308,12 @@ class PhantomUtilityMeterSensor(SensorEntity, RestoreEntity):
         
         try:
             current_value = float(source_state.state)
+            
+            # Check unit of measurement and convert if needed
+            source_unit = source_state.attributes.get("unit_of_measurement", "").lower()
+            if source_unit in ["wh", "w·h", "w-h"]:
+                # Convert Wh to kWh
+                current_value = current_value / 1000.0
             
             # Detect reset (significant decrease)
             if (self._last_source_value is not None and 
