@@ -88,50 +88,70 @@ class PhantomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         """Initialize the config flow."""
         self._data: dict[str, Any] = {}
-        self._devices: list[dict[str, Any]] = []
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the initial step."""
-        if user_input is not None:
-            return await self.async_step_add_device()
-
-        return self.async_show_form(
-            step_id="user",
-            data_schema=vol.Schema({
-                vol.Required("start_setup", default=True): bool,
-            }),
-        )
-
-    async def async_step_add_device(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Handle adding a device with power and energy sensors."""
+        """Handle the user step."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            device_name = user_input.get("device_name", "").strip()
-            power_entity = user_input.get("power_entity")
-            energy_entity = user_input.get("energy_entity")
+            # Process the submitted form
+            devices = []
+            device_count = 0
             
-            # Validate input
-            if not device_name:
-                errors["device_name"] = "device_name_required"
-            elif not power_entity and not energy_entity:
-                errors["base"] = "no_sensors_selected"
-            else:
-                # Add device to list
-                device = {
-                    "name": device_name,
-                    "power_entity": power_entity,
-                    "energy_entity": energy_entity,
-                }
-                self._devices.append(device)
+            # Count how many devices were configured
+            while f"device_{device_count}_name" in user_input:
+                device_name = user_input.get(f"device_{device_count}_name", "").strip()
+                power_entity = user_input.get(f"device_{device_count}_power")
+                energy_entity = user_input.get(f"device_{device_count}_energy")
                 
-                # Ask if user wants to add another device
-                return await self.async_step_add_another()
+                # Only add device if it has a name and at least one sensor
+                if device_name and (power_entity or energy_entity):
+                    devices.append({
+                        "name": device_name,
+                        "power_entity": power_entity,
+                        "energy_entity": energy_entity,
+                    })
+                
+                device_count += 1
+            
+            if not devices:
+                errors["base"] = "no_devices_configured"
+            else:
+                # Convert devices to legacy format for compatibility
+                power_entities = []
+                energy_entities = []
+                
+                for device in devices:
+                    if device.get("power_entity"):
+                        power_entities.append(device["power_entity"])
+                    if device.get("energy_entity"):
+                        energy_entities.append(device["energy_entity"])
+                
+                self._data[CONF_DEVICES] = devices
+                self._data[CONF_POWER_ENTITIES] = power_entities
+                self._data[CONF_ENERGY_ENTITIES] = energy_entities
+                self._data[CONF_UPSTREAM_POWER_ENTITY] = user_input.get(CONF_UPSTREAM_POWER_ENTITY)
+                self._data[CONF_UPSTREAM_ENERGY_ENTITY] = user_input.get(CONF_UPSTREAM_ENERGY_ENTITY)
+                
+                # Create unique ID based on devices
+                if devices:
+                    unique_id = f"phantom_{devices[0]['name'].lower().replace(' ', '_')}"
+                    title = f"Phantom ({len(devices)} devices)"
+                else:
+                    unique_id = "phantom_default"
+                    title = "Phantom"
+                    
+                await self.async_set_unique_id(unique_id)
+                self._abort_if_unique_id_configured()
+                
+                return self.async_create_entry(
+                    title=title,
+                    data=self._data,
+                )
 
+        # Build the form schema
         power_entities_dict = _get_power_entities(self.hass)
         energy_entities_dict = _get_energy_entities(self.hass)
 
@@ -146,128 +166,53 @@ class PhantomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             for entity_id, friendly_name in sorted(energy_entities_dict.items(), key=lambda x: x[1])
         ]
 
-        data_schema = vol.Schema(
-            {
-                vol.Required("device_name"): str,
-                vol.Optional("power_entity"): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=power_options,
-                        mode=selector.SelectSelectorMode.DROPDOWN,
-                    ),
-                ),
-                vol.Optional("energy_entity"): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=energy_options,
-                        mode=selector.SelectSelectorMode.DROPDOWN,
-                    ),
-                ),
-            }
-        )
-
-        return self.async_show_form(
-            step_id="add_device",
-            data_schema=data_schema,
-            errors=errors,
-        )
-
-    async def async_step_add_another(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Ask if user wants to add another device."""
-        if user_input is not None:
-            if user_input.get("add_another", False):
-                return await self.async_step_add_device()
-            else:
-                return await self.async_step_upstream()
-
-        # Show current devices
-        device_list = "\n".join([
-            f"• {device['name']}"
-            for device in self._devices
-        ])
-
-        return self.async_show_form(
-            step_id="add_another",
-            data_schema=vol.Schema({
-                vol.Required("add_another", default=False): bool,
-            }),
-            description_placeholders={"devices": device_list},
-        )
-
-    async def async_step_upstream(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Handle upstream entity selection."""
-        if user_input is not None:
-            self._data.update(user_input)
+        # Start with one device by default
+        num_devices = 1
+        if user_input:
+            # Count existing devices from previous form submission
+            device_count = 0
+            while f"device_{device_count}_name" in user_input:
+                device_count += 1
+            num_devices = max(1, device_count)
             
-            # Convert devices to legacy format for compatibility
-            power_entities = []
-            energy_entities = []
-            
-            for device in self._devices:
-                if device.get("power_entity"):
-                    power_entities.append(device["power_entity"])
-                if device.get("energy_entity"):
-                    energy_entities.append(device["energy_entity"])
-            
-            self._data[CONF_DEVICES] = self._devices
-            self._data[CONF_POWER_ENTITIES] = power_entities
-            self._data[CONF_ENERGY_ENTITIES] = energy_entities
-            
-            # Create unique ID based on devices
-            if self._devices:
-                unique_id = f"phantom_{self._devices[0]['name'].lower().replace(' ', '_')}"
-                title = f"Phantom ({len(self._devices)} devices)"
-            else:
-                unique_id = "phantom_default"
-                title = "Phantom"
-                
-            await self.async_set_unique_id(unique_id)
-            self._abort_if_unique_id_configured()
-            
-            return self.async_create_entry(
-                title=title,
-                data=self._data,
-            )
+            # Check if user clicked add device
+            if user_input.get("add_device"):
+                num_devices += 1
 
-        # Build schema for upstream entities
         schema_dict = {}
         
-        # Check if we have power or energy entities
-        has_power = any(device.get("power_entity") for device in self._devices)
-        has_energy = any(device.get("energy_entity") for device in self._devices)
-        
-        if has_power:
-            power_entities_dict = _get_power_entities(self.hass)
-            used_power_entities = [device["power_entity"] for device in self._devices if device.get("power_entity")]
-            
-            upstream_power_options = [
-                selector.SelectOptionDict(value=entity_id, label=friendly_name)
-                for entity_id, friendly_name in sorted(power_entities_dict.items(), key=lambda x: x[1])
-                if entity_id not in used_power_entities
-            ]
-            
-            schema_dict[vol.Optional(CONF_UPSTREAM_POWER_ENTITY)] = selector.SelectSelector(
+        # Add device configuration fields
+        for i in range(num_devices):
+            schema_dict[vol.Optional(f"device_{i}_name", default="")] = str
+            schema_dict[vol.Optional(f"device_{i}_power")] = selector.SelectSelector(
                 selector.SelectSelectorConfig(
-                    options=upstream_power_options,
+                    options=power_options,
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                ),
+            )
+            schema_dict[vol.Optional(f"device_{i}_energy")] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=energy_options,
                     mode=selector.SelectSelectorMode.DROPDOWN,
                 ),
             )
         
-        if has_energy:
-            energy_entities_dict = _get_energy_entities(self.hass)
-            used_energy_entities = [device["energy_entity"] for device in self._devices if device.get("energy_entity")]
-            
-            upstream_energy_options = [
-                selector.SelectOptionDict(value=entity_id, label=friendly_name)
-                for entity_id, friendly_name in sorted(energy_entities_dict.items(), key=lambda x: x[1])
-                if entity_id not in used_energy_entities
-            ]
-            
+        # Add "Add Device" button
+        schema_dict[vol.Optional("add_device", default=False)] = bool
+        
+        # Add upstream entity selectors
+        if power_options:
+            schema_dict[vol.Optional(CONF_UPSTREAM_POWER_ENTITY)] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=power_options,
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                ),
+            )
+        
+        if energy_options:
             schema_dict[vol.Optional(CONF_UPSTREAM_ENERGY_ENTITY)] = selector.SelectSelector(
                 selector.SelectSelectorConfig(
-                    options=upstream_energy_options,
+                    options=energy_options,
                     mode=selector.SelectSelectorMode.DROPDOWN,
                 ),
             )
@@ -275,8 +220,9 @@ class PhantomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         data_schema = vol.Schema(schema_dict)
 
         return self.async_show_form(
-            step_id="upstream",
+            step_id="user",
             data_schema=data_schema,
+            errors=errors,
         )
 
     @staticmethod
