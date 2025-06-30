@@ -1,6 +1,7 @@
 """The Phantom Power Monitoring integration."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -73,67 +74,100 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     )
     _LOGGER.info("Registered static path for panel files: %s -> /phantom-static", panel_dir)
     
+    # Wait a moment for other components to load
+    await asyncio.sleep(1)
+    
     try:
-        # Import and use the frontend's panel registration
-        from homeassistant.components import frontend
+        # Method 1: Direct service call to register panel
+        _LOGGER.info("Attempting to register panel via service call...")
         
-        # This is the direct approach used by core integrations
-        hass.data.setdefault(frontend.DATA_PANELS, {})
+        await hass.services.async_call(
+            "frontend",
+            "register_panel",
+            {
+                "panel_name": "phantom",
+                "sidebar_title": "Phantom",
+                "sidebar_icon": "mdi:flash",
+                "url_path": "phantom",
+                "js_url": "/phantom-static/phantom-panel.js",
+                "require_admin": True,
+            },
+            blocking=True,
+        )
         
-        # Register the panel data
-        hass.data[frontend.DATA_PANELS]["phantom"] = {
-            "component_name": "custom",
+        _LOGGER.info("✅ Panel registered successfully via service call")
+        return
+        
+    except Exception as err:
+        _LOGGER.warning("Service call registration failed: %s", err)
+    
+    try:
+        # Method 2: Use the low-level frontend approach
+        _LOGGER.info("Attempting direct frontend registration...")
+        
+        from homeassistant.components.frontend import async_register_built_in_panel
+        
+        await async_register_built_in_panel(
+            hass,
+            component_name="custom",
+            sidebar_title="Phantom",
+            sidebar_icon="mdi:flash",
+            frontend_url_path="phantom",
+            config={"js_url": "/phantom-static/phantom-panel.js"},
+            require_admin=True,
+        )
+        
+        _LOGGER.info("✅ Panel registered successfully via frontend API")
+        return
+        
+    except Exception as err:
+        _LOGGER.warning("Frontend API registration failed: %s", err)
+    
+    try:
+        # Method 3: Manual panel_custom setup
+        _LOGGER.info("Attempting panel_custom programmatic setup...")
+        
+        # Create a fake config entry for panel_custom
+        from homeassistant.config_entries import ConfigEntry
+        from homeassistant.const import CONF_NAME
+        
+        # Set up panel_custom if not already set up
+        if "panel_custom" not in hass.config.components:
+            hass.config.components.add("panel_custom")
+        
+        # Register directly with panel_custom's internal method
+        hass.data.setdefault("panel_custom_panels", {})
+        hass.data["panel_custom_panels"]["phantom"] = {
+            "name": "phantom-panel",
             "sidebar_title": "Phantom",
             "sidebar_icon": "mdi:flash",
-            "frontend_url_path": "phantom",
-            "config": {"js_url": "/phantom-static/phantom-panel.js"},
+            "url_path": "phantom",
+            "js_url": "/phantom-static/phantom-panel.js",
             "require_admin": True,
         }
         
-        # Trigger frontend to refresh panels
-        hass.bus.async_fire("panels_updated")
+        # Fire an event to notify frontend
+        hass.bus.async_fire("panel_custom_updated")
         
-        _LOGGER.info("Phantom panel registered automatically in sidebar")
+        _LOGGER.info("✅ Panel registered via panel_custom data")
+        return
         
     except Exception as err:
-        _LOGGER.error("Failed to auto-register panel: %s", err)
-        
-        # Fallback: Try to use the panel_custom integration if available
-        try:
-            if "panel_custom" in hass.config.components:
-                # Load the panel_custom platform programmatically
-                config_data = {
-                    "panel_custom": [
-                        {
-                            "name": "phantom-panel",
-                            "sidebar_title": "Phantom",
-                            "sidebar_icon": "mdi:flash",
-                            "url_path": "phantom",
-                            "module_url": "/phantom-static/phantom-panel.js",
-                            "require_admin": True,
-                        }
-                    ]
-                }
-                
-                # Import and set up panel_custom
-                from homeassistant.components import panel_custom
-                await panel_custom.async_setup(hass, config_data)
-                
-                _LOGGER.info("Phantom panel registered via panel_custom")
-                
-            else:
-                _LOGGER.warning("panel_custom not available. Manual configuration needed:")
-                _LOGGER.warning("Add to configuration.yaml:")
-                _LOGGER.warning("panel_custom:")
-                _LOGGER.warning("  - name: phantom-panel")
-                _LOGGER.warning("    sidebar_title: Phantom") 
-                _LOGGER.warning("    sidebar_icon: mdi:flash")
-                _LOGGER.warning("    url_path: phantom")
-                _LOGGER.warning("    module_url: /phantom-static/phantom-panel.js")
-                
-        except Exception as fallback_err:
-            _LOGGER.error("Fallback panel registration also failed: %s", fallback_err)
-            _LOGGER.warning("Manual configuration required - see logs above")
+        _LOGGER.warning("panel_custom registration failed: %s", err)
+    
+    # All methods failed
+    _LOGGER.error("❌ All automatic registration methods failed!")
+    _LOGGER.error("MANUAL SETUP REQUIRED:")
+    _LOGGER.error("Add this to your configuration.yaml:")
+    _LOGGER.error("")
+    _LOGGER.error("panel_custom:")
+    _LOGGER.error("  - name: phantom-panel")
+    _LOGGER.error("    sidebar_title: Phantom")
+    _LOGGER.error("    sidebar_icon: mdi:flash")
+    _LOGGER.error("    url_path: phantom")
+    _LOGGER.error("    module_url: /phantom-static/phantom-panel.js")
+    _LOGGER.error("")
+    _LOGGER.error("Then restart Home Assistant.")
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
