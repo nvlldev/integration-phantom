@@ -1005,36 +1005,29 @@ class PhantomUpstreamEnergyMeterSensor(SensorEntity, RestoreEntity):
         
         _LOGGER.debug("Upstream energy meter sensor %s added to hass for source %s", self.unique_id, self._upstream_entity_id)
         
-        # Restore state
-        if last_state := await self.async_get_last_state():
-            if last_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-                try:
-                    self._state = float(last_state.state)
-                    if last_state.attributes:
-                        self._baseline_value = last_state.attributes.get("baseline")
-                except (ValueError, TypeError):
-                    self._state = 0.0
-
-        # Set initial baseline if needed
-        if self._baseline_value is None:
-            upstream_state = self.hass.states.get(self._upstream_entity_id)
-            if upstream_state and upstream_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-                try:
-                    baseline_value = float(upstream_state.state)
-                    # Check unit of measurement and convert if needed
-                    source_unit = upstream_state.attributes.get("unit_of_measurement", "").lower()
-                    if source_unit in ["wh", "w·h", "w-h"]:
-                        # Convert Wh to kWh
-                        baseline_value = baseline_value / 1000.0
-                    self._baseline_value = baseline_value
-                    self._last_source_value = self._baseline_value
-                    _LOGGER.debug("Set baseline for upstream %s: %f", self._upstream_entity_id, self._baseline_value)
-                except (ValueError, TypeError):
-                    self._baseline_value = 0.0
-                    self._last_source_value = 0.0
-            else:
+        # Always start fresh - don't restore state for upstream energy meter
+        # This ensures the meter resets when integration is recreated
+        self._state = 0.0
+        
+        # Always set new baseline from current upstream value
+        upstream_state = self.hass.states.get(self._upstream_entity_id)
+        if upstream_state and upstream_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+            try:
+                baseline_value = float(upstream_state.state)
+                # Check unit of measurement and convert if needed
+                source_unit = upstream_state.attributes.get("unit_of_measurement", "").lower()
+                if source_unit in ["wh", "w·h", "w-h"]:
+                    # Convert Wh to kWh
+                    baseline_value = baseline_value / 1000.0
+                self._baseline_value = baseline_value
+                self._last_source_value = self._baseline_value
+                _LOGGER.debug("Set fresh baseline for upstream %s: %f", self._upstream_entity_id, self._baseline_value)
+            except (ValueError, TypeError):
                 self._baseline_value = 0.0
                 self._last_source_value = 0.0
+        else:
+            self._baseline_value = 0.0
+            self._last_source_value = 0.0
 
         # Track upstream entity
         self._unsubscribe_listeners.append(
@@ -1502,36 +1495,29 @@ class PhantomUtilityMeterSensor(SensorEntity, RestoreEntity):
         
         _LOGGER.debug("Utility meter sensor %s added to hass for source %s", self.unique_id, self._source_entity_id)
         
-        # Restore state
-        if last_state := await self.async_get_last_state():
-            if last_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-                try:
-                    self._state = float(last_state.state)
-                    if last_state.attributes:
-                        self._baseline_value = last_state.attributes.get("baseline")
-                except (ValueError, TypeError):
-                    self._state = 0.0
-
-        # Set initial baseline if needed
-        if self._baseline_value is None:
-            source_state = self.hass.states.get(self._source_entity_id)
-            if source_state and source_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-                try:
-                    baseline_value = float(source_state.state)
-                    # Check unit of measurement and convert if needed
-                    source_unit = source_state.attributes.get("unit_of_measurement", "").lower()
-                    if source_unit in ["wh", "w·h", "w-h"]:
-                        # Convert Wh to kWh
-                        baseline_value = baseline_value / 1000.0
-                    self._baseline_value = baseline_value
-                    self._last_source_value = self._baseline_value
-                    _LOGGER.debug("Set baseline for %s: %f", self._source_entity_id, self._baseline_value)
-                except (ValueError, TypeError):
-                    self._baseline_value = 0.0
-                    self._last_source_value = 0.0
-            else:
+        # Always start fresh - don't restore state for utility meters
+        # This ensures the meter resets when integration is recreated
+        self._state = 0.0
+        
+        # Always set new baseline from current source value
+        source_state = self.hass.states.get(self._source_entity_id)
+        if source_state and source_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+            try:
+                baseline_value = float(source_state.state)
+                # Check unit of measurement and convert if needed
+                source_unit = source_state.attributes.get("unit_of_measurement", "").lower()
+                if source_unit in ["wh", "w·h", "w-h"]:
+                    # Convert Wh to kWh
+                    baseline_value = baseline_value / 1000.0
+                self._baseline_value = baseline_value
+                self._last_source_value = self._baseline_value
+                _LOGGER.debug("Set fresh baseline for %s: %f", self._source_entity_id, self._baseline_value)
+            except (ValueError, TypeError):
                 self._baseline_value = 0.0
                 self._last_source_value = 0.0
+        else:
+            self._baseline_value = 0.0
+            self._last_source_value = 0.0
 
         # Track source entity changes
         self._unsubscribe_listeners.append(
