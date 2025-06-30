@@ -62,12 +62,12 @@ def ws_get_config(
         vol.Required("devices"): [
             {
                 vol.Required("name"): str,
-                vol.Optional("power_entity"): vol.Any(str, None),
-                vol.Optional("energy_entity"): vol.Any(str, None),
+                vol.Optional("power_entity", default=None): vol.Any(str, None),
+                vol.Optional("energy_entity", default=None): vol.Any(str, None),
             }
         ],
-        vol.Optional("upstream_power_entity"): vol.Any(str, None),
-        vol.Optional("upstream_energy_entity"): vol.Any(str, None),
+        vol.Optional("upstream_power_entity", default=None): vol.Any(str, None),
+        vol.Optional("upstream_energy_entity", default=None): vol.Any(str, None),
     }
 )
 @callback

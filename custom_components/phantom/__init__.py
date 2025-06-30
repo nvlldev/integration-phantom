@@ -64,24 +64,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def _async_register_panel(hass: HomeAssistant) -> None:
     """Register the Phantom configuration panel."""
-    if "phantom-panel" not in hass.data.get("frontend_panels", {}):
-        hass.http.register_static_path(
-            "/api/phantom/panel", 
-            hass.config.path("custom_components/phantom/panel"), 
-            True
-        )
+    # Register static path for panel files
+    hass.http.register_static_path(
+        "/api/phantom/panel", 
+        hass.config.path("custom_components/phantom/panel"), 
+        True
+    )
+    
+    # Use the frontend integration to register the panel
+    try:
+        from homeassistant.components.frontend import async_register_built_in_panel
         
-        await hass.components.frontend.async_register_built_in_panel(
+        await async_register_built_in_panel(
+            hass,
             component_name="custom",
             sidebar_title="Phantom",
             sidebar_icon="mdi:flash",
             frontend_url_path="phantom",
-            config={
-                "js_url": "/api/phantom/panel/phantom-panel.js",
-                "embed_iframe": False,
-            },
+            config={"js_url": "/api/phantom/panel/phantom-panel.js"},
             require_admin=True,
         )
+        _LOGGER.info("Phantom panel registered successfully")
+    except Exception as err:
+        _LOGGER.error("Failed to register Phantom panel: %s", err)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
