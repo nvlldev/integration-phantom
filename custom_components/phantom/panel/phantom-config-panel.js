@@ -1,5 +1,5 @@
 // Phantom Power Monitoring Panel
-console.log("[Phantom] Loading panel...");
+console.log("[Phantom] Loading panel v1.0.2...");
 
 class HaPanelPhantom extends HTMLElement {
   constructor() {
@@ -134,9 +134,14 @@ class HaPanelPhantom extends HTMLElement {
       <div style="padding: 20px; color: red; text-align: center;">
         <h2>⚡ Phantom Power Monitoring</h2>
         <p><strong>Error:</strong> ${message}</p>
-        <button onclick="location.reload()">Reload</button>
+        <button class="reload-btn">Reload</button>
       </div>
     `;
+    // Add click handler for reload button
+    const reloadBtn = this.querySelector('.reload-btn');
+    if (reloadBtn) {
+      reloadBtn.addEventListener('click', () => location.reload());
+    }
   }
 
   showToast(message, type = "info") {
