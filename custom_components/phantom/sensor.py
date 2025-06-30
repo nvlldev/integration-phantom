@@ -73,6 +73,15 @@ async def async_setup_entry(
         
         # Power remainder if upstream configured
         if upstream_power_entity:
+            # Add upstream power sensor
+            entities.append(
+                PhantomUpstreamPowerSensor(
+                    hass,
+                    config_entry,
+                    upstream_power_entity,
+                )
+            )
+            
             entities.append(
                 PhantomPowerRemainderSensor(
                     hass,
@@ -95,6 +104,15 @@ async def async_setup_entry(
         
         # Energy remainder if upstream configured
         if upstream_energy_entity:
+            # Add upstream energy utility meter
+            entities.append(
+                PhantomUpstreamEnergyMeterSensor(
+                    hass,
+                    config_entry,
+                    upstream_energy_entity,
+                )
+            )
+            
             entities.append(
                 PhantomEnergyRemainderSensor(
                     hass,
@@ -630,6 +648,308 @@ class PhantomIndividualPowerSensor(SensorEntity, RestoreEntity):
         self.async_write_ha_state()
 
 
+class PhantomUpstreamPowerSensor(SensorEntity, RestoreEntity):
+    """Upstream power sensor."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        config_entry: ConfigEntry,
+        upstream_entity_id: str,
+    ) -> None:
+        """Initialize the upstream power sensor."""
+        self.hass = hass
+        self._config_entry = config_entry
+        self._upstream_entity_id = upstream_entity_id
+        self._state = None
+        self._available = True
+        self._unsubscribe_listeners = []
+
+    @property
+    def has_entity_name(self) -> bool:
+        """Return True if entity has a name."""
+        return True
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._config_entry.entry_id)},
+            name=self._config_entry.title,
+            manufacturer="Phantom",
+            model="Power Monitor",
+            sw_version="1.0.0",
+        )
+
+    @property
+    def unique_id(self) -> str:
+        """Return a unique ID."""
+        return f"{self._config_entry.entry_id}_upstream_power"
+
+    @property
+    def name(self) -> str:
+        """Return the name of the sensor."""
+        return "Upstream power"
+
+    @property
+    def should_poll(self) -> bool:
+        """Return False as we handle updates via state change events."""
+        return False
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        return self._available
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the state of the sensor."""
+        return self._state
+
+    @property
+    def device_class(self) -> SensorDeviceClass:
+        """Return the device class."""
+        return SensorDeviceClass.POWER
+
+    @property
+    def state_class(self) -> SensorStateClass:
+        """Return the state class."""
+        return SensorStateClass.MEASUREMENT
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        """Return the unit of measurement."""
+        return UnitOfPower.WATT
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the state attributes."""
+        return {"source_entity": self._upstream_entity_id}
+
+    async def async_added_to_hass(self) -> None:
+        """Run when entity about to be added to hass."""
+        await super().async_added_to_hass()
+        
+        # Restore state
+        if last_state := await self.async_get_last_state():
+            if last_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                try:
+                    self._state = float(last_state.state)
+                except (ValueError, TypeError):
+                    self._state = None
+
+        # Track upstream entity
+        self._unsubscribe_listeners.append(
+            async_track_state_change_event(
+                self.hass,
+                [self._upstream_entity_id],
+                self._async_state_changed,
+            )
+        )
+        
+        await self._async_update_state()
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Run when entity will be removed from hass."""
+        for unsubscribe in self._unsubscribe_listeners:
+            unsubscribe()
+        self._unsubscribe_listeners.clear()
+
+    @callback
+    def _async_state_changed(self, event) -> None:
+        """Handle state changes."""
+        self.hass.async_create_task(self._async_update_state())
+
+    async def _async_update_state(self) -> None:
+        """Update the upstream power sensor state."""
+        upstream_state = self.hass.states.get(self._upstream_entity_id)
+        
+        if not upstream_state or upstream_state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+            self._available = False
+            self._state = None
+        else:
+            try:
+                self._state = float(upstream_state.state)
+                self._available = True
+            except (ValueError, TypeError):
+                _LOGGER.warning("Invalid upstream power value for %s: %s", self._upstream_entity_id, upstream_state.state)
+                self._available = False
+                self._state = None
+        
+        self.async_write_ha_state()
+
+
+class PhantomUpstreamEnergyMeterSensor(SensorEntity, RestoreEntity):
+    """Upstream energy utility meter sensor that starts at 0."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        config_entry: ConfigEntry,
+        upstream_entity_id: str,
+    ) -> None:
+        """Initialize the upstream energy meter sensor."""
+        self.hass = hass
+        self._config_entry = config_entry
+        self._upstream_entity_id = upstream_entity_id
+        self._state = 0.0
+        self._available = True
+        self._baseline_value = None
+        self._last_source_value = None
+        self._unsubscribe_listeners = []
+
+    @property
+    def has_entity_name(self) -> bool:
+        """Return True if entity has a name."""
+        return True
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._config_entry.entry_id)},
+            name=self._config_entry.title,
+            manufacturer="Phantom",
+            model="Power Monitor",
+            sw_version="1.0.0",
+        )
+
+    @property
+    def unique_id(self) -> str:
+        """Return a unique ID."""
+        return f"{self._config_entry.entry_id}_upstream_energy_meter"
+
+    @property
+    def name(self) -> str:
+        """Return the name of the sensor."""
+        return "Upstream energy meter"
+
+    @property
+    def should_poll(self) -> bool:
+        """Return False as we handle updates via state change events."""
+        return False
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        return self._available
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the state of the sensor."""
+        return self._state
+
+    @property
+    def device_class(self) -> SensorDeviceClass:
+        """Return the device class."""
+        return SensorDeviceClass.ENERGY
+
+    @property
+    def state_class(self) -> SensorStateClass:
+        """Return the state class."""
+        return SensorStateClass.TOTAL_INCREASING
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        """Return the unit of measurement."""
+        return UnitOfEnergy.KILO_WATT_HOUR
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the state attributes."""
+        attributes = {"source_entity": self._upstream_entity_id}
+        if self._baseline_value is not None:
+            attributes["baseline"] = self._baseline_value
+        return attributes
+
+    async def async_added_to_hass(self) -> None:
+        """Run when entity about to be added to hass."""
+        await super().async_added_to_hass()
+        
+        # Restore state
+        if last_state := await self.async_get_last_state():
+            if last_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                try:
+                    self._state = float(last_state.state)
+                    if last_state.attributes:
+                        self._baseline_value = last_state.attributes.get("baseline")
+                except (ValueError, TypeError):
+                    self._state = 0.0
+
+        # Set initial baseline if needed
+        if self._baseline_value is None:
+            upstream_state = self.hass.states.get(self._upstream_entity_id)
+            if upstream_state and upstream_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                try:
+                    self._baseline_value = float(upstream_state.state)
+                    self._last_source_value = self._baseline_value
+                except (ValueError, TypeError):
+                    self._baseline_value = 0.0
+                    self._last_source_value = 0.0
+            else:
+                self._baseline_value = 0.0
+                self._last_source_value = 0.0
+
+        # Track upstream entity
+        self._unsubscribe_listeners.append(
+            async_track_state_change_event(
+                self.hass,
+                [self._upstream_entity_id],
+                self._async_state_changed,
+            )
+        )
+        
+        await self._async_update_state()
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Run when entity will be removed from hass."""
+        for unsubscribe in self._unsubscribe_listeners:
+            unsubscribe()
+        self._unsubscribe_listeners.clear()
+
+    @callback
+    def _async_state_changed(self, event) -> None:
+        """Handle state changes."""
+        self.hass.async_create_task(self._async_update_state())
+
+    async def _async_update_state(self) -> None:
+        """Update the upstream energy meter state."""
+        upstream_state = self.hass.states.get(self._upstream_entity_id)
+        
+        if not upstream_state or upstream_state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+            self._available = False
+            return
+        
+        try:
+            current_value = float(upstream_state.state)
+            
+            # Detect reset (significant decrease)
+            if (self._last_source_value is not None and 
+                current_value < self._last_source_value - 1.0):
+                # Adjust baseline to account for reset
+                usage_before_reset = self._last_source_value - self._baseline_value
+                self._baseline_value = current_value - usage_before_reset
+            
+            # Calculate usage since baseline
+            usage = current_value - self._baseline_value
+            if usage >= 0:
+                self._state = round(usage, 3)
+                self._available = True
+            else:
+                # Negative usage indicates a problem, reset
+                self._baseline_value = current_value
+                self._state = 0.0
+                self._available = True
+            
+            self._last_source_value = current_value
+            
+        except (ValueError, TypeError):
+            _LOGGER.warning("Invalid upstream energy value for %s: %s", self._upstream_entity_id, upstream_state.state)
+            self._available = False
+        
+        self.async_write_ha_state()
+
+
 class PhantomPowerRemainderSensor(PhantomRemainderBaseSensor):
     """Phantom power remainder sensor."""
 
@@ -686,6 +1006,90 @@ class PhantomEnergyRemainderSensor(PhantomRemainderBaseSensor):
     def native_unit_of_measurement(self) -> str:
         """Return the unit of measurement."""
         return UnitOfEnergy.KILO_WATT_HOUR
+
+    async def async_added_to_hass(self) -> None:
+        """Run when entity about to be added to hass."""
+        await super().async_added_to_hass()
+        
+        # Restore last state
+        if last_state := await self.async_get_last_state():
+            if last_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                try:
+                    self._state = float(last_state.state)
+                except (ValueError, TypeError):
+                    self._state = None
+
+        # Track utility meter entities instead of raw entities
+        track_entities = []
+        
+        # Add individual utility meter entities
+        for entity_id in self._entities:
+            clean_id = entity_id.replace(".", "_")
+            meter_id = f"sensor.{self._config_entry.entry_id}_meter_{clean_id}"
+            track_entities.append(meter_id)
+        
+        # Add upstream utility meter entity
+        upstream_meter_id = f"sensor.{self._config_entry.entry_id}_upstream_energy_meter"
+        track_entities.append(upstream_meter_id)
+        
+        self._unsubscribe_listeners.append(
+            async_track_state_change_event(
+                self.hass,
+                track_entities,
+                self._async_state_changed,
+            )
+        )
+        
+        # Initial state update
+        await self._async_update_state()
+
+    async def _async_update_state(self) -> None:
+        """Update the energy remainder sensor state using utility meter values."""
+        # Calculate group total from utility meters
+        group_total = 0.0
+        group_available = 0
+        
+        for entity_id in self._entities:
+            # Get the utility meter for this entity
+            clean_id = entity_id.replace(".", "_")
+            meter_id = f"sensor.{self._config_entry.entry_id}_meter_{clean_id}"
+            state = self.hass.states.get(meter_id)
+            
+            if state and state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                try:
+                    value = float(state.state)
+                    group_total += value
+                    group_available += 1
+                except (ValueError, TypeError):
+                    _LOGGER.warning("Invalid utility meter value for %s: %s", meter_id, state.state)
+                    continue
+        
+        # Get upstream utility meter value
+        upstream_meter_id = f"sensor.{self._config_entry.entry_id}_upstream_energy_meter"
+        upstream_state = self.hass.states.get(upstream_meter_id)
+        upstream_value = None
+        upstream_available = False
+        
+        if upstream_state and upstream_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+            try:
+                upstream_value = float(upstream_state.state)
+                upstream_available = True
+            except (ValueError, TypeError):
+                _LOGGER.warning("Invalid upstream meter value for %s: %s", upstream_meter_id, upstream_state.state)
+        
+        # Remainder sensor is only available if BOTH conditions are met:
+        # 1. At least one group utility meter is available
+        # 2. Upstream utility meter is available
+        if group_available > 0 and upstream_available:
+            self._available = True
+            remainder = upstream_value - group_total
+            self._state = round(remainder, 3)
+        else:
+            # Either no group meters or no upstream meter - sensor unavailable
+            self._available = False
+            self._state = None
+        
+        self.async_write_ha_state()
 
 
 class PhantomUtilityMeterSensor(SensorEntity, RestoreEntity):
