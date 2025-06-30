@@ -24,17 +24,15 @@ async def async_register_panel(hass: HomeAssistant) -> None:
     # Register the panel using the proper method
     await async_register_built_in_panel(
         hass,
-        component_name="config",  # Use config instead of custom
+        component_name="custom",
         sidebar_title="Phantom",
         sidebar_icon="mdi:flash",
         frontend_url_path="phantom",
         config={
-            "_panel_custom": {
-                "name": "ha-panel-phantom",
-                "embed_iframe": False,
-                "trust_external": False,
-                "js_url": "/phantom-static/ha-panel-phantom.js",
-            }
+            "name": "ha-panel-phantom",
+            "embed_iframe": False,
+            "trust_external": False,
+            "js_url": "/phantom-static/ha-panel-phantom.js",
         },
         require_admin=True,
     )
