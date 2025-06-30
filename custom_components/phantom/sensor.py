@@ -848,9 +848,20 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor):
         
         # Find upstream meter entity
         self._upstream_meter_entity = await self._find_upstream_meter_entity()
+        _LOGGER.debug(
+            "Energy remainder for group '%s' - looking for upstream meter with unique_id: %s, found: %s",
+            self._group_name,
+            f"{self._config_entry_id}_{_sanitize_name(self._group_name)}_upstream_energy_meter",
+            self._upstream_meter_entity,
+        )
         
         # Find utility meter entities
         self._utility_meter_entities = await self._find_utility_meter_entities()
+        _LOGGER.debug(
+            "Energy remainder for group '%s' - found %d utility meters",
+            self._group_name,
+            len(self._utility_meter_entities),
+        )
         
         all_entities = []
         if self._upstream_meter_entity:
@@ -858,7 +869,7 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor):
         all_entities.extend(self._utility_meter_entities)
         
         if all_entities:
-            _LOGGER.debug(
+            _LOGGER.info(
                 "Energy remainder tracking entities for group '%s': upstream=%s, meters=%s",
                 self._group_name,
                 self._upstream_meter_entity,
@@ -874,8 +885,10 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor):
             )
         else:
             _LOGGER.warning(
-                "No entities found for energy remainder tracking in group '%s'",
+                "No entities found for energy remainder tracking in group '%s' - upstream: %s, meters: %s",
                 self._group_name,
+                self._upstream_meter_entity,
+                self._utility_meter_entities,
             )
         
         self._setup_delayed = True
@@ -888,6 +901,22 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor):
         
         # Generate expected unique ID for upstream meter
         expected_unique_id = f"{self._config_entry_id}_{_sanitize_name(self._group_name)}_upstream_energy_meter"
+        
+        _LOGGER.debug(
+            "Looking for upstream meter entity with unique_id: %s",
+            expected_unique_id,
+        )
+        
+        # Debug: log all our platform's entities
+        our_entities = []
+        for entity_id, entry in entity_registry.entities.items():
+            if entry.platform == DOMAIN and entry.config_entry_id == self._config_entry_id:
+                our_entities.append(f"{entity_id} (unique_id: {entry.unique_id})")
+        
+        _LOGGER.debug(
+            "All Phantom entities for this config entry: %s",
+            our_entities,
+        )
         
         # Find entity with this unique ID
         for entity_id, entry in entity_registry.entities.items():
@@ -938,6 +967,11 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor):
         upstream_value = None
         if self._upstream_meter_entity:
             upstream_state = self.hass.states.get(self._upstream_meter_entity)
+            _LOGGER.debug(
+                "Energy remainder '%s' - upstream meter state: %s",
+                self._group_name,
+                upstream_state.state if upstream_state else "None",
+            )
             if upstream_state and upstream_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
                 try:
                     upstream_value = float(upstream_state.state)
@@ -945,6 +979,10 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor):
                     pass
         
         if upstream_value is None:
+            _LOGGER.debug(
+                "Energy remainder '%s' - upstream value is None, marking unavailable",
+                self._group_name,
+            )
             self._attr_available = False
             self._attr_native_value = None
             return
@@ -961,11 +999,22 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor):
             if state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
                 any_available = True
                 try:
-                    total += float(state.state)
+                    value = float(state.state)
+                    total += value
+                    _LOGGER.debug(
+                        "Energy remainder '%s' - utility meter %s: %s",
+                        self._group_name,
+                        entity_id,
+                        value,
+                    )
                 except (ValueError, TypeError):
                     _LOGGER.warning("Could not convert state to float: %s", state.state)
         
         if not any_available:
+            _LOGGER.debug(
+                "Energy remainder '%s' - no utility meters available, marking unavailable",
+                self._group_name,
+            )
             self._attr_available = False
             self._attr_native_value = None
         else:
@@ -973,3 +1022,10 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor):
             remainder = upstream_value - total
             # Energy remainder should not go negative
             self._attr_native_value = round(max(0, remainder), 3)
+            _LOGGER.debug(
+                "Energy remainder '%s' - calculated: %s - %s = %s",
+                self._group_name,
+                upstream_value,
+                total,
+                self._attr_native_value,
+            )
