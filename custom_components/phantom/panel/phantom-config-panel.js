@@ -1,5 +1,4 @@
 // Phantom Power Monitoring Panel
-console.log("[Phantom] Loading panel v5.0...");
 
 class PhantomConfigPanel extends HTMLElement {
   constructor() {
@@ -9,11 +8,11 @@ class PhantomConfigPanel extends HTMLElement {
     this.isLoading = true;
     this.selectedGroupIndex = -1;
     
-    console.log("[Phantom] Panel constructor");
+    // console.log("[Phantom] Panel constructor");
   }
 
   set hass(hass) {
-    console.log("[Phantom] Hass object received:", hass);
+    // console.log("[Phantom] Hass object received:", hass);
     this._hass = hass;
     if (!this.hasInitialized) {
       this.hasInitialized = true;
@@ -26,19 +25,19 @@ class PhantomConfigPanel extends HTMLElement {
   }
 
   set narrow(value) {
-    console.log("[Phantom] Narrow:", value);
+    // console.log("[Phantom] Narrow:", value);
   }
 
   set route(value) {
-    console.log("[Phantom] Route:", value);
+    // console.log("[Phantom] Route:", value);
   }
 
   set panel(value) {
-    console.log("[Phantom] Panel:", value);
+    // console.log("[Phantom] Panel:", value);
   }
 
   async initialize() {
-    console.log("[Phantom] Initializing panel...");
+    // console.log("[Phantom] Initializing panel...");
     this.innerHTML = '<div style="padding: 20px;">Loading Phantom configuration...</div>';
     
     // Set up event delegation
@@ -49,7 +48,7 @@ class PhantomConfigPanel extends HTMLElement {
     try {
       await this.loadConfiguration();
     } catch (error) {
-      console.error("[Phantom] Error during initialization:", error);
+      // console.error("[Phantom] Error during initialization:", error);
       this.showError(`Initialization error: ${error.message}`);
     }
   }
@@ -110,7 +109,7 @@ class PhantomConfigPanel extends HTMLElement {
   }
 
   async loadConfiguration() {
-    console.log("[Phantom] Loading configuration...");
+    // console.log("[Phantom] Loading configuration...");
     try {
       this.isLoading = true;
       this.render();
@@ -119,20 +118,20 @@ class PhantomConfigPanel extends HTMLElement {
         type: "phantom/get_config",
       });
       
-      console.log("[Phantom] Configuration response:", response);
+      // console.log("[Phantom] Configuration response:", response);
       
       this.groups = response.groups || [];
       
       this.isLoading = false;
       this.render();
     } catch (error) {
-      console.error("[Phantom] Failed to load configuration:", error);
+      // console.error("[Phantom] Failed to load configuration:", error);
       this.showError(`Failed to load configuration: ${error.message}`);
     }
   }
 
   async saveConfiguration() {
-    console.log("[Phantom] Saving configuration...");
+    // console.log("[Phantom] Saving configuration...");
     try {
       await this._hass.callWS({
         type: "phantom/save_config",
@@ -143,7 +142,7 @@ class PhantomConfigPanel extends HTMLElement {
       this.selectedGroupIndex = -1;
       this.render();
     } catch (error) {
-      console.error("[Phantom] Failed to save configuration:", error);
+      // console.error("[Phantom] Failed to save configuration:", error);
       this.showToast(`Failed to save: ${error.message}`, "error");
     }
   }
@@ -581,9 +580,9 @@ class PhantomConfigPanel extends HTMLElement {
 // Register the custom element with a new name to avoid conflicts
 if (!customElements.get("phantom-config-panel")) {
   customElements.define("phantom-config-panel", PhantomConfigPanel);
-  console.log("[Phantom] Panel registered as phantom-config-panel");
+  // console.log("[Phantom] Panel registered as phantom-config-panel");
 } else {
-  console.log("[Phantom] Panel already registered, skipping");
+  // console.log("[Phantom] Panel already registered, skipping");
 }
 
-console.log("[Phantom] Panel script loaded");
+// console.log("[Phantom] Panel script loaded");

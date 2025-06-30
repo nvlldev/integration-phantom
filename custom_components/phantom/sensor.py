@@ -33,6 +33,7 @@ from .const import (
     DOMAIN,
 )
 from .state_migration import get_migrated_state, clear_migration_data
+from .utils import sanitize_name
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -50,58 +51,38 @@ async def async_setup_entry(
     
     entities = []
     
-    # Handle both old (single group) and new (multiple groups) format
-    if CONF_GROUPS in config:
-        # New format - multiple groups
-        groups = config.get(CONF_GROUPS, [])
-        _LOGGER.info("Setting up Phantom sensors for %d groups", len(groups))
+    groups = config.get(CONF_GROUPS, [])
+    _LOGGER.info("Setting up Phantom sensors for %d groups", len(groups))
+    
+    for group_index, group in enumerate(groups):
+        group_name = group.get(CONF_GROUP_NAME, f"Group {group_index + 1}")
+        devices = group.get(CONF_DEVICES, [])
+        upstream_power_entity = group.get(CONF_UPSTREAM_POWER_ENTITY)
+        upstream_energy_entity = group.get(CONF_UPSTREAM_ENERGY_ENTITY)
         
-        for group_index, group in enumerate(groups):
-            group_name = group.get(CONF_GROUP_NAME, f"Group {group_index + 1}")
-            devices = group.get(CONF_DEVICES, [])
-            upstream_power_entity = group.get(CONF_UPSTREAM_POWER_ENTITY)
-            upstream_energy_entity = group.get(CONF_UPSTREAM_ENERGY_ENTITY)
-            
-            _LOGGER.info(
-                "Setting up group '%s' (index %d) with %d devices, upstream_power=%s, upstream_energy=%s",
-                group_name,
-                group_index,
-                len(devices),
-                upstream_power_entity,
-                upstream_energy_entity
-            )
-            
-            # Create sensors for this group
-            try:
-                group_entities = await _create_group_sensors(
-                    hass,
-                    config_entry,
-                    group_name,
-                    devices,
-                    upstream_power_entity,
-                    upstream_energy_entity,
-                )
-                _LOGGER.info("Created %d entities for group '%s'", len(group_entities), group_name)
-                entities.extend(group_entities)
-            except Exception as e:
-                _LOGGER.error("Error creating sensors for group '%s': %s", group_name, e, exc_info=True)
-    else:
-        # Old format - single group (backward compatibility)
-        devices = config.get(CONF_DEVICES, [])
-        upstream_power_entity = config.get(CONF_UPSTREAM_POWER_ENTITY)
-        upstream_energy_entity = config.get(CONF_UPSTREAM_ENERGY_ENTITY)
-        
-        _LOGGER.debug("Setting up Phantom sensors - legacy single group mode")
-        
-        group_entities = await _create_group_sensors(
-            hass,
-            config_entry,
-            "Default",
-            devices,
+        _LOGGER.info(
+            "Setting up group '%s' (index %d) with %d devices, upstream_power=%s, upstream_energy=%s",
+            group_name,
+            group_index,
+            len(devices),
             upstream_power_entity,
-            upstream_energy_entity,
+            upstream_energy_entity
         )
-        entities.extend(group_entities)
+        
+        # Create sensors for this group
+        try:
+            group_entities = await _create_group_sensors(
+                hass,
+                config_entry,
+                group_name,
+                devices,
+                upstream_power_entity,
+                upstream_energy_entity,
+            )
+            _LOGGER.info("Created %d entities for group '%s'", len(group_entities), group_name)
+            entities.extend(group_entities)
+        except Exception as e:
+            _LOGGER.error("Error creating sensors for group '%s': %s", group_name, e, exc_info=True)
     
     # Add all entities
     if entities:
@@ -255,9 +236,6 @@ async def _create_group_sensors(
     return entities
 
 
-def _sanitize_name(name: str) -> str:
-    """Sanitize a name for use in entity IDs."""
-    return name.lower().replace(" ", "_").replace("-", "_")
 
 
 class PhantomBaseSensor(SensorEntity):
@@ -276,17 +254,16 @@ class PhantomBaseSensor(SensorEntity):
         self._config_entry_id = config_entry_id
         self._group_name = group_name
         self._sensor_type = sensor_type
-        self._attr_unique_id = f"{config_entry_id}_{_sanitize_name(group_name)}_{sensor_type}"
+        self._attr_unique_id = f"{config_entry_id}_{sanitize_name(group_name)}_{sensor_type}"
     
     @property
     def device_info(self) -> DeviceInfo:
         """Return device information."""
         return DeviceInfo(
-            identifiers={(DOMAIN, f"{self._config_entry_id}_{_sanitize_name(self._group_name)}")},
+            identifiers={(DOMAIN, f"{self._config_entry_id}_{sanitize_name(self._group_name)}")},
             name=f"Phantom {self._group_name}",
             manufacturer="Phantom",
             model="Power Monitor",
-            # configuration_url="/phantom",  # Temporarily disabled due to validation error
         )
 
 
@@ -438,7 +415,7 @@ class PhantomEnergySensor(PhantomBaseSensor, RestoreEntity):
         for device in self._devices:
             device_name = device.get("name", "Unknown")
             # Generate expected unique ID for utility meter
-            expected_unique_id = f"{self._config_entry_id}_{_sanitize_name(self._group_name)}_utility_meter_{_sanitize_name(device_name)}"
+            expected_unique_id = f"{self._config_entry_id}_{sanitize_name(self._group_name)}_utility_meter_{sanitize_name(device_name)}"
             
             # Find entity with this unique ID
             for entity_id, entry in entity_registry.entities.items():
@@ -504,7 +481,7 @@ class PhantomIndividualPowerSensor(PhantomBaseSensor):
         super().__init__(
             config_entry_id, 
             group_name, 
-            f"power_{_sanitize_name(device_name)}"
+            f"power_{sanitize_name(device_name)}"
         )
         self._device_name = device_name
         self._power_entity = power_entity
@@ -582,7 +559,7 @@ class PhantomUtilityMeterSensor(PhantomBaseSensor, RestoreEntity):
         super().__init__(
             config_entry_id,
             group_name,
-            f"utility_meter_{_sanitize_name(device_name)}"
+            f"utility_meter_{sanitize_name(device_name)}"
         )
         self._hass = hass
         self._device_name = device_name
@@ -1042,7 +1019,7 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor):
         _LOGGER.debug(
             "Energy remainder for group '%s' - looking for upstream meter with unique_id: %s, found: %s",
             self._group_name,
-            f"{self._config_entry_id}_{_sanitize_name(self._group_name)}_upstream_energy_meter",
+            f"{self._config_entry_id}_{sanitize_name(self._group_name)}_upstream_energy_meter",
             self._upstream_meter_entity,
         )
         
@@ -1091,7 +1068,7 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor):
         entity_registry = er.async_get(self.hass)
         
         # Generate expected unique ID for upstream meter
-        expected_unique_id = f"{self._config_entry_id}_{_sanitize_name(self._group_name)}_upstream_energy_meter"
+        expected_unique_id = f"{self._config_entry_id}_{sanitize_name(self._group_name)}_upstream_energy_meter"
         
         _LOGGER.debug(
             "Looking for upstream meter entity with unique_id: %s",
@@ -1128,7 +1105,7 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor):
         for device in self._devices:
             device_name = device.get("name", "Unknown")
             # Generate expected unique ID for utility meter
-            expected_unique_id = f"{self._config_entry_id}_{_sanitize_name(self._group_name)}_utility_meter_{_sanitize_name(device_name)}"
+            expected_unique_id = f"{self._config_entry_id}_{sanitize_name(self._group_name)}_utility_meter_{sanitize_name(device_name)}"
             
             # Find entity with this unique ID
             for entity_id, entry in entity_registry.entities.items():

@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN, CONF_GROUPS, CONF_GROUP_NAME, CONF_DEVICES
+from .utils import sanitize_name
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -16,9 +17,6 @@ _LOGGER = logging.getLogger(__name__)
 MIGRATION_STORAGE_KEY = f"{DOMAIN}_state_migration"
 
 
-def _sanitize_name(name: str) -> str:
-    """Sanitize a name for use in entity IDs."""
-    return name.lower().replace(" ", "_").replace("-", "_")
 
 
 def save_current_states_for_migration(
@@ -80,8 +78,8 @@ def create_migration_mapping(
                 for device in old_group.get(CONF_DEVICES, []):
                     device_name = device.get("name", "")
                     if device_name and device.get("energy_entity"):
-                        old_unique_id = f"{config_entry_id}_{_sanitize_name(old_name)}_utility_meter_{_sanitize_name(device_name)}"
-                        new_unique_id = f"{config_entry_id}_{_sanitize_name(new_name)}_utility_meter_{_sanitize_name(device_name)}"
+                        old_unique_id = f"{config_entry_id}_{sanitize_name(old_name)}_utility_meter_{sanitize_name(device_name)}"
+                        new_unique_id = f"{config_entry_id}_{sanitize_name(new_name)}_utility_meter_{sanitize_name(device_name)}"
                         
                         # Find the old entity ID from saved states
                         for entity_id, state_data in saved_states.items():
@@ -101,8 +99,8 @@ def create_migration_mapping(
                                 break
                 
                 # Map upstream energy meter if it exists
-                old_upstream_id = f"{config_entry_id}_{_sanitize_name(old_name)}_upstream_energy_meter"
-                new_upstream_id = f"{config_entry_id}_{_sanitize_name(new_name)}_upstream_energy_meter"
+                old_upstream_id = f"{config_entry_id}_{sanitize_name(old_name)}_upstream_energy_meter"
+                new_upstream_id = f"{config_entry_id}_{sanitize_name(new_name)}_upstream_energy_meter"
                 
                 for entity_id, state_data in saved_states.items():
                     if state_data["unique_id"] == old_upstream_id:

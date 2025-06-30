@@ -8,13 +8,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 
 from .const import DOMAIN, CONF_GROUPS, CONF_GROUP_NAME
+from .utils import sanitize_name
 
 _LOGGER = logging.getLogger(__name__)
 
 
-def _sanitize_name(name: str) -> str:
-    """Sanitize a name for use in entity IDs."""
-    return name.lower().replace(" ", "_").replace("-", "_")
 
 
 async def async_cleanup_orphaned_devices(
@@ -33,7 +31,7 @@ async def async_cleanup_orphaned_devices(
             group_name = group.get(CONF_GROUP_NAME, "")
             if group_name:
                 # Store the sanitized name that matches device identifiers
-                current_groups.add(_sanitize_name(group_name))
+                current_groups.add(sanitize_name(group_name))
     
     _LOGGER.info("Current groups in config: %s", current_groups)
     

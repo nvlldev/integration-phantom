@@ -8,7 +8,6 @@ import voluptuous as vol
 
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.typing import ConfigType
 
 from .const import CONF_DEVICES, CONF_UPSTREAM_POWER_ENTITY, CONF_UPSTREAM_ENERGY_ENTITY, CONF_GROUPS, CONF_GROUP_NAME, DOMAIN
 from .state_migration import save_current_states_for_migration, create_migration_mapping, store_migration_data
@@ -48,28 +47,8 @@ def ws_get_config(
     # Get current configuration
     config = hass.data.get(DOMAIN, {}).get(config_entry.entry_id, {})
     
-    # Handle both old (single group) and new (multiple groups) format
-    if CONF_GROUPS in config:
-        # New format - return as is
-        result = {"groups": config.get(CONF_GROUPS, [])}
-    else:
-        # Old format - convert to new format with single group
-        devices = config.get(CONF_DEVICES, [])
-        upstream_power = config.get(CONF_UPSTREAM_POWER_ENTITY)
-        upstream_energy = config.get(CONF_UPSTREAM_ENERGY_ENTITY)
-        
-        if devices or upstream_power or upstream_energy:
-            # Create a default group from old config
-            result = {
-                "groups": [{
-                    CONF_GROUP_NAME: "Default Group",
-                    CONF_DEVICES: devices,
-                    CONF_UPSTREAM_POWER_ENTITY: upstream_power,
-                    CONF_UPSTREAM_ENERGY_ENTITY: upstream_energy,
-                }]
-            }
-        else:
-            result = {"groups": []}
+    # Return groups configuration
+    result = {"groups": config.get(CONF_GROUPS, [])}
     
     connection.send_result(msg["id"], result)
 
