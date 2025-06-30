@@ -21,14 +21,9 @@ async def async_register_panel(hass: HomeAssistant) -> None:
     )
     _LOGGER.info("Registered static path for panel files: %s -> /phantom-static", panel_dir)
     
-    # Check if panel already exists
-    frontend_panels = getattr(hass.components.frontend, "panels", {})
-    if "phantom" in frontend_panels:
-        _LOGGER.info("Phantom panel already registered, skipping registration")
-        return
-    
     try:
-        # Register the panel using the proper method
+        # Register the panel directly without checking
+        # The frontend component handles duplicate registrations internally
         frontend.async_register_built_in_panel(
             hass,
             component_name="custom",
@@ -42,11 +37,10 @@ async def async_register_panel(hass: HomeAssistant) -> None:
                 "js_url": "/phantom-static/ha-panel-phantom.js",
             },
             require_admin=True,
+            update=True,  # Allow updating existing panel
         )
         
         _LOGGER.info("✅ Phantom panel registered successfully")
-    except ValueError as e:
-        if "Overwriting panel" in str(e):
-            _LOGGER.warning("Panel already exists, this is expected on reload")
-        else:
-            raise
+    except Exception as e:
+        _LOGGER.error("Failed to register panel: %s", e)
+        # Don't raise - allow the integration to continue loading
