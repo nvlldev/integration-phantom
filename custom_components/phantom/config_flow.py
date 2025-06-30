@@ -32,10 +32,10 @@ class PhantomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if self._async_current_entries():
             return self.async_abort(reason="single_instance_allowed")
 
-        # Create the entry immediately
+        # Create the entry immediately with empty groups
         return self.async_create_entry(
             title="Phantom Power Monitoring",
-            data={"devices": []},
+            data={"groups": []},
         )
 
     @staticmethod

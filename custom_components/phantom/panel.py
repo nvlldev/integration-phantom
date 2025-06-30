@@ -35,7 +35,7 @@ async def async_register_panel(hass: HomeAssistant) -> None:
                     "name": "phantom-config-panel",
                     "embed_iframe": False,
                     "trust_external": False,
-                    "module_url": "/phantom-static/phantom-config-panel.js?v=2",
+                    "module_url": "/phantom-static/phantom-config-panel.js?v=4.0",
                 }
             },
             require_admin=True,
