@@ -3,7 +3,10 @@
     "step": {
       "user": {
         "title": "Setup Phantom Power Monitoring",
-        "description": "Add devices with power and energy monitoring"
+        "description": "Add devices with power and energy monitoring",
+        "data": {
+          "start_setup": "Start configuration"
+        }
       },
       "add_device": {
         "title": "Add Device",
