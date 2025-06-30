@@ -1,14 +1,5 @@
 {
   "config": {
-    "step": {
-      "user": {
-        "title": "Setup Phantom Power Monitoring",
-        "description": "Phantom provides advanced power and energy monitoring with device grouping and remainder calculations.\n\nAfter installation, use the Phantom panel in the sidebar to configure your devices.",
-        "data": {
-          "confirm": "Setup Phantom Power Monitoring"
-        }
-      }
-    },
     "abort": {
       "already_configured": "Phantom Power Monitoring is already configured"
     }
