@@ -73,57 +73,67 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     )
     _LOGGER.info("Registered static path for panel files: %s -> /phantom-static", panel_dir)
     
-    # Create a simple HTML wrapper that loads our component
-    wrapper_html = """<!DOCTYPE html>
-<html>
-<head>
-    <title>Phantom Power Monitoring</title>
-    <style>
-        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto; }
-    </style>
-</head>
-<body>
-    <phantom-panel></phantom-panel>
-    <script type="module" src="/phantom-static/phantom-panel.js"></script>
-    <script>
-        // Wait for Home Assistant to load and pass hass object
-        window.addEventListener('message', (event) => {
-            if (event.data.type === 'hass-update') {
-                const panel = document.querySelector('phantom-panel');
-                if (panel) {
-                    panel.hass = event.data.hass;
-                }
-            }
-        });
-        
-        // Also try to get hass from window
-        setTimeout(() => {
-            const panel = document.querySelector('phantom-panel');
-            if (panel && window.parent && window.parent.hass) {
-                panel.hass = window.parent.hass;
-            }
-        }, 1000);
-    </script>
-</body>
-</html>"""
-    
-    # Write the wrapper HTML file
-    wrapper_path = hass.config.path("custom_components/phantom/panel/index.html")
     try:
-        with open(wrapper_path, "w") as f:
-            f.write(wrapper_html)
-        _LOGGER.info("Created panel wrapper HTML at: %s", wrapper_path)
+        # Import and use the frontend's panel registration
+        from homeassistant.components import frontend
+        
+        # This is the direct approach used by core integrations
+        hass.data.setdefault(frontend.DATA_PANELS, {})
+        
+        # Register the panel data
+        hass.data[frontend.DATA_PANELS]["phantom"] = {
+            "component_name": "custom",
+            "sidebar_title": "Phantom",
+            "sidebar_icon": "mdi:flash",
+            "frontend_url_path": "phantom",
+            "config": {"js_url": "/phantom-static/phantom-panel.js"},
+            "require_admin": True,
+        }
+        
+        # Trigger frontend to refresh panels
+        hass.bus.async_fire("panels_updated")
+        
+        _LOGGER.info("Phantom panel registered automatically in sidebar")
+        
     except Exception as err:
-        _LOGGER.error("Failed to create panel wrapper: %s", err)
-    
-    # Skip panel registration for now - user will need to add manually
-    _LOGGER.info("Panel files ready. Add this to configuration.yaml:")
-    _LOGGER.info("panel_custom:")
-    _LOGGER.info("  - name: phantom-panel")
-    _LOGGER.info("    sidebar_title: Phantom")
-    _LOGGER.info("    sidebar_icon: mdi:flash")
-    _LOGGER.info("    url_path: phantom")
-    _LOGGER.info("    module_url: /phantom-static/phantom-panel.js")
+        _LOGGER.error("Failed to auto-register panel: %s", err)
+        
+        # Fallback: Try to use the panel_custom integration if available
+        try:
+            if "panel_custom" in hass.config.components:
+                # Load the panel_custom platform programmatically
+                config_data = {
+                    "panel_custom": [
+                        {
+                            "name": "phantom-panel",
+                            "sidebar_title": "Phantom",
+                            "sidebar_icon": "mdi:flash",
+                            "url_path": "phantom",
+                            "module_url": "/phantom-static/phantom-panel.js",
+                            "require_admin": True,
+                        }
+                    ]
+                }
+                
+                # Import and set up panel_custom
+                from homeassistant.components import panel_custom
+                await panel_custom.async_setup(hass, config_data)
+                
+                _LOGGER.info("Phantom panel registered via panel_custom")
+                
+            else:
+                _LOGGER.warning("panel_custom not available. Manual configuration needed:")
+                _LOGGER.warning("Add to configuration.yaml:")
+                _LOGGER.warning("panel_custom:")
+                _LOGGER.warning("  - name: phantom-panel")
+                _LOGGER.warning("    sidebar_title: Phantom") 
+                _LOGGER.warning("    sidebar_icon: mdi:flash")
+                _LOGGER.warning("    url_path: phantom")
+                _LOGGER.warning("    module_url: /phantom-static/phantom-panel.js")
+                
+        except Exception as fallback_err:
+            _LOGGER.error("Fallback panel registration also failed: %s", fallback_err)
+            _LOGGER.warning("Manual configuration required - see logs above")
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
