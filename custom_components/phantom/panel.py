@@ -31,10 +31,12 @@ async def async_register_panel(hass: HomeAssistant) -> None:
             sidebar_icon="mdi:flash",
             frontend_url_path="phantom",
             config={
-                "name": "ha-panel-phantom",
-                "embed_iframe": False,
-                "trust_external": False,
-                "js_url": "/phantom-static/ha-panel-phantom.js",
+                "_panel_custom": {
+                    "name": "ha-panel-phantom",
+                    "embed_iframe": False,
+                    "trust_external": False,
+                    "module_url": "/phantom-static/ha-panel-phantom.js",
+                }
             },
             require_admin=True,
             update=True,  # Allow updating existing panel
