@@ -48,6 +48,12 @@ async def async_setup_entry(
     upstream_power_entity = config.get(CONF_UPSTREAM_POWER_ENTITY)
     upstream_energy_entity = config.get(CONF_UPSTREAM_ENERGY_ENTITY)
     
+    _LOGGER.debug("Setting up Phantom sensors - config_entry_id: %s", config_entry.entry_id)
+    _LOGGER.debug("Power entities: %s", power_entities)
+    _LOGGER.debug("Energy entities: %s", energy_entities)
+    _LOGGER.debug("Upstream power: %s", upstream_power_entity)
+    _LOGGER.debug("Upstream energy: %s", upstream_energy_entity)
+    
     # Power sensors
     if power_entities:
         # Individual power meters for each power entity
@@ -105,6 +111,7 @@ async def async_setup_entry(
         # Energy remainder if upstream configured
         if upstream_energy_entity:
             # Add upstream energy utility meter
+            _LOGGER.debug("Creating upstream energy meter for entity: %s", upstream_energy_entity)
             entities.append(
                 PhantomUpstreamEnergyMeterSensor(
                     hass,
@@ -113,6 +120,7 @@ async def async_setup_entry(
                 )
             )
             
+            _LOGGER.debug("Creating energy remainder sensor")
             entities.append(
                 PhantomEnergyRemainderSensor(
                     hass,
@@ -124,6 +132,7 @@ async def async_setup_entry(
         
         # Individual utility meters for each energy entity
         for entity_id in energy_entities:
+            _LOGGER.debug("Creating utility meter for entity: %s", entity_id)
             entities.append(
                 PhantomUtilityMeterSensor(
                     hass,
@@ -134,6 +143,7 @@ async def async_setup_entry(
                 )
             )
     
+    _LOGGER.debug("Adding %d entities to Home Assistant", len(entities))
     async_add_entities(entities)
 
 
@@ -1076,10 +1086,14 @@ class PhantomEnergyRemainderSensor(PhantomRemainderBaseSensor):
         entity_registry = async_get_entity_registry(self.hass)
         utility_meter_entities = []
         
+        _LOGGER.debug("Looking for utility meter entities in registry with %d total entities", len(entity_registry.entities))
+        
         # Look for entities with our unique IDs
         for entity_id in self._entities:
             clean_id = entity_id.replace(".", "_")
             expected_unique_id = f"{self._config_entry.entry_id}_meter_{clean_id}"
+            
+            _LOGGER.debug("Searching for utility meter with unique_id: %s", expected_unique_id)
             
             # Find entity with this unique ID
             for ent_id, entry in entity_registry.entities.items():
@@ -1089,6 +1103,10 @@ class PhantomEnergyRemainderSensor(PhantomRemainderBaseSensor):
                     break
             else:
                 _LOGGER.debug("Could not find utility meter entity for unique_id: %s", expected_unique_id)
+                # Debug: show similar unique IDs
+                similar_ids = [entry.unique_id for entry in entity_registry.entities.values() 
+                             if entry.unique_id and self._config_entry.entry_id in entry.unique_id]
+                _LOGGER.debug("Similar unique IDs in registry: %s", similar_ids)
         
         return utility_meter_entities
 
@@ -1099,6 +1117,8 @@ class PhantomEnergyRemainderSensor(PhantomRemainderBaseSensor):
         entity_registry = async_get_entity_registry(self.hass)
         expected_unique_id = f"{self._config_entry.entry_id}_upstream_energy_meter"
         
+        _LOGGER.debug("Searching for upstream meter with unique_id: %s", expected_unique_id)
+        
         # Find entity with this unique ID
         for ent_id, entry in entity_registry.entities.items():
             if entry.unique_id == expected_unique_id:
@@ -1106,6 +1126,10 @@ class PhantomEnergyRemainderSensor(PhantomRemainderBaseSensor):
                 return ent_id
         
         _LOGGER.debug("Could not find upstream meter entity for unique_id: %s", expected_unique_id)
+        # Debug: show similar unique IDs
+        similar_ids = [entry.unique_id for entry in entity_registry.entities.values() 
+                     if entry.unique_id and self._config_entry.entry_id in entry.unique_id]
+        _LOGGER.debug("Similar unique IDs in registry: %s", similar_ids)
         return None
 
     async def _async_update_state(self) -> None:
