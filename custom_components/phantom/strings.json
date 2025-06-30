@@ -1,33 +1,28 @@
 {
   "config": {
     "step": {
-      "user": {
-        "title": "Setup Phantom Power Monitoring",
-        "description": "Configure devices with power and energy monitoring. Each device needs a name and at least one sensor.",
+      "device": {
+        "title": "Add Device",
+        "description": "Configure a device with power and/or energy sensors.\n\nDevices configured: {device_count}\nCurrent devices: {devices}",
         "data": {
-          "device_0_name": "Device 1 - Name",
-          "device_0_power": "Device 1 - Power sensor (Watts)",
-          "device_0_energy": "Device 1 - Energy sensor (kWh)",
-          "device_1_name": "Device 2 - Name", 
-          "device_1_power": "Device 2 - Power sensor (Watts)",
-          "device_1_energy": "Device 2 - Energy sensor (kWh)",
-          "device_2_name": "Device 3 - Name",
-          "device_2_power": "Device 3 - Power sensor (Watts)", 
-          "device_2_energy": "Device 3 - Energy sensor (kWh)",
-          "device_3_name": "Device 4 - Name",
-          "device_3_power": "Device 4 - Power sensor (Watts)",
-          "device_3_energy": "Device 4 - Energy sensor (kWh)",
-          "device_4_name": "Device 5 - Name",
-          "device_4_power": "Device 5 - Power sensor (Watts)",
-          "device_4_energy": "Device 5 - Energy sensor (kWh)",
-          "add_device": "Add another device",
-          "upstream_power_entity": "Upstream power entity (optional)",
-          "upstream_energy_entity": "Upstream energy entity (optional)"
+          "device_name": "Device name",
+          "power_entity": "Power sensor (Watts)",
+          "energy_entity": "Energy sensor (kWh)",
+          "add_another": "Add another device"
+        }
+      },
+      "upstream": {
+        "title": "Configure Upstream Entities",
+        "description": "Optionally select upstream entities to calculate remainder.\n\nConfigured devices:\n{devices}",
+        "data": {
+          "upstream_power_entity": "Upstream power entity",
+          "upstream_energy_entity": "Upstream energy entity"
         }
       }
     },
     "error": {
-      "no_devices_configured": "Please configure at least one device with a name and sensor"
+      "no_sensors_selected": "Please select at least one power or energy sensor",
+      "device_name_required": "Device name is required"
     },
     "abort": {
       "already_configured": "This configuration is already set up"
@@ -36,9 +31,40 @@
   "options": {
     "step": {
       "init": {
-        "title": "Configure Phantom Power Monitoring",
-        "description": "Configuration changes require removing and re-adding the integration"
+        "title": "Phantom Power Monitoring Options",
+        "description": "Choose what you want to configure",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "add_device": {
+        "title": "Add New Device",
+        "description": "Add a new device to monitor",
+        "data": {
+          "device_name": "Device name",
+          "power_entity": "Power sensor (Watts)",
+          "energy_entity": "Energy sensor (kWh)"
+        }
+      },
+      "manage_devices": {
+        "title": "Manage Devices",
+        "description": "Select which devices to keep (unselected devices will be removed)",
+        "data": {
+          "devices": "Devices to keep"
+        }
+      },
+      "upstream": {
+        "title": "Configure Upstream Entities",
+        "description": "Configure upstream entities for remainder calculations",
+        "data": {
+          "upstream_power_entity": "Upstream power entity",
+          "upstream_energy_entity": "Upstream energy entity"
+        }
       }
+    },
+    "error": {
+      "no_sensors_selected": "Please select at least one power or energy sensor",
+      "device_name_required": "Device name is required"
     }
   }
 }
