@@ -1,531 +1,413 @@
-console.log("Phantom panel script loading...");
+// Phantom Power Monitoring Panel
+console.log("Loading Phantom panel...");
 
+// Panel configuration
+const PANEL_CONFIG = {
+  title: "Phantom Power Monitoring",
+  icon: "mdi:flash",
+  url_path: "phantom"
+};
+
+// Wait for Home Assistant to be ready
+function waitForHass() {
+  return new Promise((resolve) => {
+    // Check various possible locations for hass connection
+    const checkLocations = [
+      () => window.hassConnection,
+      () => window.parent && window.parent.hassConnection,
+      () => window.top && window.top.hassConnection,
+      () => document.querySelector("home-assistant") && document.querySelector("home-assistant").hass,
+      () => window.hassEl && window.hassEl.hass
+    ];
+    
+    // Try immediate resolution
+    for (const check of checkLocations) {
+      try {
+        const result = check();
+        if (result) {
+          resolve(result);
+          return;
+        }
+      } catch (e) {
+        // Ignore errors, continue checking
+      }
+    }
+    
+    // Wait for it to be available
+    const checkInterval = setInterval(() => {
+      for (const check of checkLocations) {
+        try {
+          const result = check();
+          if (result) {
+            clearInterval(checkInterval);
+            resolve(result);
+            return;
+          }
+        } catch (e) {
+          // Ignore errors, continue checking
+        }
+      }
+    }, 100);
+    
+    // Fallback timeout
+    setTimeout(() => {
+      clearInterval(checkInterval);
+      console.error("Could not find hassConnection after 15 seconds");
+      resolve(null);
+    }, 15000);
+  });
+}
+
+// Get hass object from connection
+async function getHass() {
+  const connection = await waitForHass();
+  if (!connection) return null;
+  
+  // Try to get hass from various locations
+  const hassLocations = [
+    () => connection.hass,
+    () => connection,
+    () => window.hass,
+    () => window.parent && window.parent.hass,
+    () => window.top && window.top.hass,
+    () => document.querySelector("home-assistant") && document.querySelector("home-assistant").hass,
+    () => window.hassEl && window.hassEl.hass
+  ];
+  
+  for (const getHassObj of hassLocations) {
+    try {
+      const hass = getHassObj();
+      if (hass && hass.callWS) {
+        return hass;
+      }
+    } catch (e) {
+      // Ignore errors, continue checking
+    }
+  }
+  
+  console.error("Could not find hass object with callWS method");
+  return null;
+}
+
+// Panel component
 class PhantomPanel extends HTMLElement {
   constructor() {
     super();
-    this._devices = [];
-    this._upstreamPower = "";
-    this._upstreamEnergy = "";
-    this._isLoading = true;
-    this._initialized = false;
+    this.hass = null;
+    this.devices = [];
+    this.upstreamPower = "";
+    this.upstreamEnergy = "";
+    this.isLoading = true;
     
-    console.log("PhantomPanel constructor called");
+    console.log("PhantomPanel constructor");
   }
 
-  set hass(hass) {
-    console.log("Setting hass object:", hass);
-    this._hass = hass;
-    if (!this._initialized && hass) {
-      this._initialized = true;
-      this._loadConfiguration();
+  async connectedCallback() {
+    console.log("PhantomPanel connected");
+    this.innerHTML = '<div style="padding: 20px;">Loading Phantom configuration...</div>';
+    
+    try {
+      this.hass = await getHass();
+      if (this.hass) {
+        console.log("Got hass object:", this.hass);
+        await this.loadConfiguration();
+      } else {
+        this.showError("Could not connect to Home Assistant");
+      }
+    } catch (error) {
+      console.error("Error in connectedCallback:", error);
+      this.showError(`Connection error: ${error.message}`);
     }
   }
 
-  get hass() {
-    return this._hass;
-  }
-
-  connectedCallback() {
-    console.log("PhantomPanel connected to DOM");
-    this.innerHTML = `
-      <div style="padding: 20px; text-align: center;">
-        <h1>⚡ Phantom Power Monitoring</h1>
-        <p>Loading configuration...</p>
-      </div>
-    `;
-    
-    // Try to get hass from various sources
-    this._tryGetHass();
-  }
-
-  _tryGetHass() {
-    // Try multiple ways to get the hass object
-    let attempts = 0;
-    const maxAttempts = 20;
-    
-    const tryGet = () => {
-      attempts++;
-      console.log(`Attempt ${attempts} to get hass object`);
-      
-      // Try to get from window
-      if (window.hass) {
-        console.log("Found hass in window");
-        this.hass = window.hass;
-        return;
-      }
-      
-      // Try to get from parent window
-      if (window.parent && window.parent.hass) {
-        console.log("Found hass in parent window");
-        this.hass = window.parent.hass;
-        return;
-      }
-      
-      // Try to get from document
-      if (document.querySelector("home-assistant")) {
-        const ha = document.querySelector("home-assistant");
-        if (ha && ha.hass) {
-          console.log("Found hass in home-assistant element");
-          this.hass = ha.hass;
-          return;
-        }
-      }
-      
-      if (attempts < maxAttempts) {
-        setTimeout(tryGet, 500);
-      } else {
-        console.error("Could not find hass object after", maxAttempts, "attempts");
-        this._showError("Could not connect to Home Assistant. Please refresh the page.");
-      }
-    };
-    
-    setTimeout(tryGet, 100);
-  }
-
-  async _loadConfiguration() {
+  async loadConfiguration() {
     console.log("Loading configuration...");
     try {
-      this._isLoading = true;
-      this._render();
+      this.isLoading = true;
+      this.render();
       
-      if (!this._hass || !this._hass.callWS) {
-        throw new Error("Home Assistant connection not available");
-      }
-      
-      const response = await this._hass.callWS({
+      const response = await this.hass.callWS({
         type: "phantom/get_config",
       });
       
-      console.log("Configuration loaded:", response);
+      console.log("Configuration response:", response);
       
-      if (response) {
-        this._devices = response.devices || [];
-        this._upstreamPower = response.upstream_power_entity || "";
-        this._upstreamEnergy = response.upstream_energy_entity || "";
-      }
+      this.devices = response.devices || [];
+      this.upstreamPower = response.upstream_power_entity || "";
+      this.upstreamEnergy = response.upstream_energy_entity || "";
+      
+      this.isLoading = false;
+      this.render();
     } catch (error) {
-      console.error("Failed to load Phantom configuration:", error);
-      this._showError(`Failed to load configuration: ${error.message}`);
-    } finally {
-      this._isLoading = false;
-      this._render();
+      console.error("Failed to load configuration:", error);
+      this.showError(`Failed to load configuration: ${error.message}`);
     }
   }
 
-  async _saveConfiguration() {
-    console.log("Saving configuration...", this._devices);
+  async saveConfiguration() {
+    console.log("Saving configuration...");
     try {
-      if (!this._hass || !this._hass.callWS) {
-        throw new Error("Home Assistant connection not available");
-      }
-      
-      await this._hass.callWS({
+      await this.hass.callWS({
         type: "phantom/save_config",
-        devices: this._devices,
-        upstream_power_entity: this._upstreamPower || null,
-        upstream_energy_entity: this._upstreamEnergy || null,
+        devices: this.devices,
+        upstream_power_entity: this.upstreamPower || null,
+        upstream_energy_entity: this.upstreamEnergy || null,
       });
       
-      this._showToast("Configuration saved successfully!", "success");
+      this.showToast("Configuration saved successfully!", "success");
     } catch (error) {
       console.error("Failed to save configuration:", error);
-      this._showToast(`Failed to save configuration: ${error.message}`, "error");
+      this.showToast(`Failed to save: ${error.message}`, "error");
     }
   }
 
-  _showError(message) {
+  showError(message) {
     this.innerHTML = `
-      <div style="padding: 20px; text-align: center; color: red;">
-        <h1>⚡ Phantom Power Monitoring</h1>
+      <div style="padding: 20px; color: red; text-align: center;">
+        <h2>⚡ Phantom Power Monitoring</h2>
         <p><strong>Error:</strong> ${message}</p>
-        <button onclick="location.reload()">Reload Page</button>
+        <button onclick="location.reload()">Reload</button>
       </div>
     `;
   }
 
-  _showToast(message, type = "info") {
-    console.log("Toast:", type, message);
+  showToast(message, type = "info") {
     const toast = document.createElement("div");
     toast.textContent = message;
     toast.style.cssText = `
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      padding: 12px 24px;
-      border-radius: 4px;
-      color: white;
-      font-weight: 500;
-      z-index: 1000;
+      position: fixed; top: 20px; right: 20px; padding: 12px 24px;
+      border-radius: 4px; color: white; font-weight: 500; z-index: 1000;
       background: ${type === "success" ? "#4caf50" : type === "error" ? "#f44336" : "#2196f3"};
     `;
     document.body.appendChild(toast);
     setTimeout(() => toast.remove(), 3000);
   }
 
-  _getPowerEntities() {
-    if (!this._hass) return [];
-    return Object.values(this._hass.states).filter(
+  addDevice() {
+    this.devices.push({ name: "", power_entity: "", energy_entity: "" });
+    this.render();
+  }
+
+  removeDevice(index) {
+    this.devices.splice(index, 1);
+    this.render();
+  }
+
+  updateDevice(index, field, value) {
+    this.devices[index][field] = value;
+  }
+
+  updateUpstream(field, value) {
+    if (field === "power") this.upstreamPower = value;
+    else if (field === "energy") this.upstreamEnergy = value;
+  }
+
+  getPowerEntities() {
+    if (!this.hass) return [];
+    return Object.values(this.hass.states).filter(
       state => state.entity_id.startsWith("sensor.") && 
                state.attributes.device_class === "power"
     );
   }
 
-  _getEnergyEntities() {
-    if (!this._hass) return [];
-    return Object.values(this._hass.states).filter(
+  getEnergyEntities() {
+    if (!this.hass) return [];
+    return Object.values(this.hass.states).filter(
       state => state.entity_id.startsWith("sensor.") && 
                state.attributes.device_class === "energy"
     );
   }
 
-  _addDevice() {
-    console.log("Adding device");
-    this._devices = [...this._devices, {
-      name: "",
-      power_entity: "",
-      energy_entity: ""
-    }];
-    this._render();
-  }
-
-  _removeDevice(index) {
-    console.log("Removing device", index);
-    this._devices = this._devices.filter((_, i) => i !== index);
-    this._render();
-  }
-
-  _updateDevice(index, field, value) {
-    console.log("Updating device", index, field, value);
-    const devices = [...this._devices];
-    devices[index] = { ...devices[index], [field]: value };
-    this._devices = devices;
-  }
-
-  _updateUpstream(field, value) {
-    console.log("Updating upstream", field, value);
-    if (field === "power") {
-      this._upstreamPower = value;
-    } else if (field === "energy") {
-      this._upstreamEnergy = value;
-    }
-  }
-
-  _getUsedEntities(type) {
-    return new Set(this._devices
+  getUsedEntities(type) {
+    return new Set(this.devices
       .map(device => device[`${type}_entity`])
       .filter(entity => entity)
     );
   }
 
-  _getEntityOptionsHTML(entities, selected = "", excludeSet = new Set()) {
-    return entities
-      .filter(entity => !excludeSet.has(entity.entity_id))
-      .map(entity => `
-        <option value="${entity.entity_id}" ${selected === entity.entity_id ? 'selected' : ''}>
-          ${entity.attributes.friendly_name || entity.entity_id}
-        </option>
-      `).join('');
-  }
-
-  _render() {
-    console.log("Rendering panel, isLoading:", this._isLoading);
-    
-    if (this._isLoading) {
-      this.innerHTML = `
-        <div style="padding: 20px; text-align: center;">
-          <h1>⚡ Phantom Power Monitoring</h1>
-          <p>Loading configuration...</p>
-        </div>
-      `;
+  render() {
+    if (this.isLoading) {
+      this.innerHTML = '<div style="padding: 20px; text-align: center;">Loading...</div>';
       return;
     }
 
-    if (!this._hass) {
-      this.innerHTML = `
-        <div style="padding: 20px; text-align: center;">
-          <h1>⚡ Phantom Power Monitoring</h1>
-          <p>Connecting to Home Assistant...</p>
-        </div>
-      `;
-      return;
-    }
-
-    const powerEntities = this._getPowerEntities();
-    const energyEntities = this._getEnergyEntities();
-    const usedPowerEntities = this._getUsedEntities("power");
-    const usedEnergyEntities = this._getUsedEntities("energy");
+    const powerEntities = this.getPowerEntities();
+    const energyEntities = this.getEnergyEntities();
+    const usedPowerEntities = this.getUsedEntities("power");
+    const usedEnergyEntities = this.getUsedEntities("energy");
 
     console.log("Rendering with:", {
-      devices: this._devices.length,
+      devices: this.devices.length,
       powerEntities: powerEntities.length,
       energyEntities: energyEntities.length
     });
 
     this.innerHTML = `
       <style>
-        .phantom-panel {
-          padding: 16px;
-          max-width: 1200px;
-          margin: 0 auto;
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        }
-
-        .header {
-          margin-bottom: 32px;
-          padding-bottom: 16px;
-          border-bottom: 1px solid #e0e0e0;
-        }
-
-        .header h1 {
-          margin: 0;
-          font-size: 32px;
-          font-weight: 400;
-          color: #333;
-        }
-
-        .section {
-          background: white;
-          border-radius: 8px;
-          padding: 24px;
-          margin-bottom: 24px;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-          border: 1px solid #e0e0e0;
-        }
-
-        .section h2 {
-          margin-top: 0;
-          margin-bottom: 16px;
-          font-size: 20px;
-          font-weight: 500;
-          color: #333;
-        }
-
-        .device-card {
-          border: 1px solid #e0e0e0;
-          border-radius: 8px;
-          padding: 16px;
-          margin-bottom: 16px;
-          background: #f9f9f9;
-        }
-
-        .device-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 12px;
-        }
-
-        .device-name {
-          font-weight: 500;
-          font-size: 16px;
-          color: #333;
-        }
-
-        .delete-button {
-          background: #f44336;
-          color: white;
-          border: none;
-          border-radius: 4px;
-          padding: 8px 12px;
-          cursor: pointer;
-          font-size: 14px;
-        }
-
-        .device-row {
-          display: flex;
-          gap: 16px;
-          margin-bottom: 8px;
-          align-items: center;
-        }
-
-        .device-row label {
-          min-width: 120px;
-          font-size: 14px;
-          color: #666;
-        }
-
-        .device-row input, .device-row select {
-          flex: 1;
-          padding: 8px;
-          border: 1px solid #ccc;
-          border-radius: 4px;
-          background: white;
-          color: #333;
-          font-size: 14px;
-        }
-
-        .add-device {
-          border: 2px dashed #ccc;
-          border-radius: 8px;
-          padding: 24px;
-          text-align: center;
-          cursor: pointer;
-          transition: all 0.2s;
-          background: #f9f9f9;
-        }
-
-        .add-device:hover {
-          border-color: #2196f3;
-        }
-
-        .actions {
-          display: flex;
-          gap: 12px;
-          justify-content: flex-end;
-          margin-top: 24px;
-        }
-
-        .btn {
-          padding: 12px 24px;
-          border: none;
-          border-radius: 4px;
-          cursor: pointer;
-          font-size: 14px;
-          font-weight: 500;
-        }
-
-        .btn-primary {
-          background: #2196f3;
-          color: white;
-        }
-
-        .btn-secondary {
-          background: #f5f5f5;
-          color: #333;
-          border: 1px solid #ccc;
-        }
-
-        .empty-state {
-          text-align: center;
-          padding: 48px 24px;
-          color: #666;
-        }
+        .phantom-panel { padding: 16px; max-width: 1200px; margin: 0 auto; font-family: var(--primary-font-family); }
+        .section { background: var(--card-background-color); border-radius: 8px; padding: 24px; margin-bottom: 24px; box-shadow: var(--ha-card-box-shadow); }
+        .section h2 { margin-top: 0; color: var(--primary-text-color); }
+        .device-card { border: 1px solid var(--divider-color); border-radius: 8px; padding: 16px; margin-bottom: 16px; background: var(--secondary-background-color); }
+        .device-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .device-row { display: flex; gap: 16px; margin-bottom: 8px; align-items: center; }
+        .device-row label { min-width: 120px; color: var(--secondary-text-color); }
+        .device-row input, .device-row select { flex: 1; padding: 8px; border: 1px solid var(--divider-color); border-radius: 4px; background: var(--card-background-color); color: var(--primary-text-color); }
+        .add-device { border: 2px dashed var(--divider-color); border-radius: 8px; padding: 24px; text-align: center; cursor: pointer; }
+        .add-device:hover { border-color: var(--primary-color); }
+        .btn { padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500; }
+        .btn-primary { background: var(--primary-color); color: white; }
+        .btn-secondary { background: var(--secondary-background-color); color: var(--primary-text-color); }
+        .actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px; }
+        .delete-btn { background: var(--error-color); color: white; border: none; border-radius: 4px; padding: 8px 12px; cursor: pointer; }
       </style>
 
       <div class="phantom-panel">
-        <div class="header">
-          <h1>⚡ Phantom Power Monitoring</h1>
-        </div>
+        <h1>⚡ Phantom Power Monitoring</h1>
 
         <div class="section">
-          <h2>Devices (${this._devices.length})</h2>
+          <h2>Devices (${this.devices.length})</h2>
           
-          ${this._devices.length === 0 ? `
-            <div class="empty-state">
-              <h3>No devices configured</h3>
-              <p>Add your first device to start monitoring power and energy consumption.</p>
-            </div>
-          ` : this._devices.map((device, index) => `
+          ${this.devices.length === 0 ? `
+            <p style="text-align: center; color: var(--secondary-text-color); padding: 40px;">
+              No devices configured. Add your first device to start monitoring.
+            </p>
+          ` : this.devices.map((device, index) => `
             <div class="device-card">
               <div class="device-header">
-                <div class="device-name">Device ${index + 1}: ${device.name || 'Unnamed'}</div>
-                <button class="delete-button" onclick="window.phantomPanel._removeDevice(${index})">
-                  Delete
-                </button>
+                <strong>Device ${index + 1}: ${device.name || 'Unnamed'}</strong>
+                <button class="delete-btn" onclick="phantomPanel.removeDevice(${index})">Delete</button>
               </div>
               
               <div class="device-row">
-                <label>Device Name:</label>
-                <input
-                  type="text"
-                  value="${device.name || ''}"
-                  onchange="window.phantomPanel._updateDevice(${index}, 'name', this.value)"
-                  placeholder="Enter device name"
-                >
+                <label>Name:</label>
+                <input value="${device.name || ''}" 
+                       onchange="phantomPanel.updateDevice(${index}, 'name', this.value)"
+                       placeholder="Enter device name">
               </div>
               
               <div class="device-row">
                 <label>Power Sensor:</label>
-                <select onchange="window.phantomPanel._updateDevice(${index}, 'power_entity', this.value)">
+                <select onchange="phantomPanel.updateDevice(${index}, 'power_entity', this.value)">
                   <option value="">Select power sensor (optional)</option>
-                  ${this._getEntityOptionsHTML(powerEntities, device.power_entity)}
+                  ${powerEntities.map(entity => 
+                    `<option value="${entity.entity_id}" ${device.power_entity === entity.entity_id ? 'selected' : ''}>
+                      ${entity.attributes.friendly_name || entity.entity_id}
+                    </option>`
+                  ).join('')}
                 </select>
               </div>
               
               <div class="device-row">
                 <label>Energy Sensor:</label>
-                <select onchange="window.phantomPanel._updateDevice(${index}, 'energy_entity', this.value)">
+                <select onchange="phantomPanel.updateDevice(${index}, 'energy_entity', this.value)">
                   <option value="">Select energy sensor (optional)</option>
-                  ${this._getEntityOptionsHTML(energyEntities, device.energy_entity)}
+                  ${energyEntities.map(entity => 
+                    `<option value="${entity.entity_id}" ${device.energy_entity === entity.entity_id ? 'selected' : ''}>
+                      ${entity.attributes.friendly_name || entity.entity_id}
+                    </option>`
+                  ).join('')}
                 </select>
               </div>
             </div>
           `).join('')}
           
-          <div class="add-device" onclick="window.phantomPanel._addDevice()">
-            <div style="font-size: 24px; color: #2196f3;">+</div>
+          <div class="add-device" onclick="phantomPanel.addDevice()">
+            <div style="font-size: 24px; color: var(--primary-color);">+</div>
             <div>Add Device</div>
           </div>
         </div>
 
         <div class="section">
           <h2>Upstream Entities</h2>
-          <p style="color: #666; margin-bottom: 16px;">
+          <p style="color: var(--secondary-text-color);">
             Configure upstream entities to calculate remainder values (upstream - group total).
           </p>
           
           <div class="device-row">
             <label>Upstream Power:</label>
-            <select onchange="window.phantomPanel._updateUpstream('power', this.value)">
+            <select onchange="phantomPanel.updateUpstream('power', this.value)">
               <option value="">Select upstream power entity (optional)</option>
-              ${this._getEntityOptionsHTML(powerEntities, this._upstreamPower, usedPowerEntities)}
+              ${powerEntities
+                .filter(entity => !usedPowerEntities.has(entity.entity_id))
+                .map(entity => 
+                  `<option value="${entity.entity_id}" ${this.upstreamPower === entity.entity_id ? 'selected' : ''}>
+                    ${entity.attributes.friendly_name || entity.entity_id}
+                  </option>`
+                ).join('')}
             </select>
           </div>
           
           <div class="device-row">
             <label>Upstream Energy:</label>
-            <select onchange="window.phantomPanel._updateUpstream('energy', this.value)">
+            <select onchange="phantomPanel.updateUpstream('energy', this.value)">
               <option value="">Select upstream energy entity (optional)</option>
-              ${this._getEntityOptionsHTML(energyEntities, this._upstreamEnergy, usedEnergyEntities)}
+              ${energyEntities
+                .filter(entity => !usedEnergyEntities.has(entity.entity_id))
+                .map(entity => 
+                  `<option value="${entity.entity_id}" ${this.upstreamEnergy === entity.entity_id ? 'selected' : ''}>
+                    ${entity.attributes.friendly_name || entity.entity_id}
+                  </option>`
+                ).join('')}
             </select>
           </div>
         </div>
 
         <div class="actions">
-          <button class="btn btn-secondary" onclick="window.phantomPanel._loadConfiguration()">
-            Reset
-          </button>
-          <button class="btn btn-primary" onclick="window.phantomPanel._saveConfiguration()">
-            Save Configuration
-          </button>
+          <button class="btn btn-secondary" onclick="phantomPanel.loadConfiguration()">Reset</button>
+          <button class="btn btn-primary" onclick="phantomPanel.saveConfiguration()">Save Configuration</button>
         </div>
       </div>
     `;
   }
 }
 
+// Register the custom element
 customElements.define("phantom-panel", PhantomPanel);
 
-// Store global reference for event handlers
-window.phantomPanel = null;
-
-// Wait for DOM and create/find the panel
+// Initialize when DOM is ready
 function initPanel() {
-  console.log("Initializing panel...");
-  let panel = document.querySelector('phantom-panel');
+  console.log("Initializing Phantom panel...");
   
-  if (!panel) {
-    console.log("Creating phantom-panel element");
-    panel = document.createElement('phantom-panel');
-    document.body.appendChild(panel);
+  // Try to find the appropriate container
+  const containerSelectors = [
+    "ha-panel-custom",
+    "[data-panel='phantom']", 
+    "#view",
+    "partial-panel-resolver",
+    "app-drawer-layout"
+  ];
+  
+  let panelContainer = null;
+  for (const selector of containerSelectors) {
+    panelContainer = document.querySelector(selector);
+    if (panelContainer) {
+      console.log(`Found panel container: ${selector}`);
+      break;
+    }
   }
   
-  window.phantomPanel = panel;
-  console.log("Panel reference stored globally:", panel);
-  
-  // Try to get hass if it's available
-  if (window.hass) {
-    panel.hass = window.hass;
-  } else if (window.parent && window.parent.hass) {
-    panel.hass = window.parent.hass;
+  // Fallback to body if no container found
+  if (!panelContainer) {
+    console.log("No specific panel container found, using body");
+    panelContainer = document.body;
   }
+  
+  // Create and add our panel
+  const phantomPanel = new PhantomPanel();
+  window.phantomPanel = phantomPanel;
+  
+  // Clear any existing content and add our panel
+  if (panelContainer !== document.body) {
+    panelContainer.innerHTML = "";
+  }
+  panelContainer.appendChild(phantomPanel);
+  
+  console.log("Phantom panel setup complete");
 }
 
-// Initialize when DOM is ready
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initPanel);
+// Wait for DOM to be ready
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initPanel);
 } else {
   initPanel();
 }
-
-console.log("Phantom panel script loaded successfully");
