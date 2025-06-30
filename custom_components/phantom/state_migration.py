@@ -58,7 +58,7 @@ def create_migration_mapping(
     config_entry_id: str,
     saved_states: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
-    """Create a mapping of old entity IDs to new entity IDs for renamed groups."""
+    """Create a mapping of old entity IDs to new entity IDs for renamed groups and devices."""
     migration_mapping = {}
     
     # Get groups from configs
@@ -118,6 +118,40 @@ def create_migration_mapping(
                         )
                         break
     
+    # Check for device renames within the same group
+    for group_name in old_groups:
+        if group_name in new_groups:
+            old_devices = old_groups[group_name].get(CONF_DEVICES, [])
+            new_devices = new_groups[group_name].get(CONF_DEVICES, [])
+            
+            # Find renamed devices by comparing entity IDs
+            device_mappings = _find_renamed_devices(old_devices, new_devices)
+            
+            for old_device_name, new_device_name in device_mappings.items():
+                _LOGGER.info("Detected device rename in group '%s': '%s' -> '%s'", 
+                           group_name, old_device_name, new_device_name)
+                
+                # Create mapping for utility meter
+                old_unique_id = f"{config_entry_id}_{sanitize_name(group_name)}_utility_meter_{sanitize_name(old_device_name)}"
+                new_unique_id = f"{config_entry_id}_{sanitize_name(group_name)}_utility_meter_{sanitize_name(new_device_name)}"
+                
+                # Find the old entity ID from saved states
+                for entity_id, state_data in saved_states.items():
+                    if state_data["unique_id"] == old_unique_id:
+                        migration_mapping[old_unique_id] = {
+                            "old_entity_id": entity_id,
+                            "new_unique_id": new_unique_id,
+                            "state": state_data["state"],
+                            "attributes": state_data["attributes"],
+                        }
+                        _LOGGER.debug(
+                            "Device migration mapping: %s -> %s (state: %s)",
+                            entity_id,
+                            new_unique_id,
+                            state_data["state"]
+                        )
+                        break
+    
     return migration_mapping
 
 
@@ -138,6 +172,33 @@ def _groups_have_same_devices(devices1: list[dict], devices2: list[dict]) -> boo
     }
     
     return dev1_set == dev2_set
+
+
+def _find_renamed_devices(old_devices: list[dict], new_devices: list[dict]) -> dict[str, str]:
+    """Find devices that have been renamed by comparing entity IDs."""
+    device_mappings = {}
+    
+    # Create lookups by entity IDs
+    old_by_entities = {
+        (dev.get("power_entity", ""), dev.get("energy_entity", "")): dev.get("name", "")
+        for dev in old_devices
+        if dev.get("power_entity") or dev.get("energy_entity")
+    }
+    
+    new_by_entities = {
+        (dev.get("power_entity", ""), dev.get("energy_entity", "")): dev.get("name", "")
+        for dev in new_devices
+        if dev.get("power_entity") or dev.get("energy_entity")
+    }
+    
+    # Find devices with same entity IDs but different names
+    for entity_pair, old_name in old_by_entities.items():
+        if entity_pair in new_by_entities:
+            new_name = new_by_entities[entity_pair]
+            if old_name != new_name:
+                device_mappings[old_name] = new_name
+    
+    return device_mappings
 
 
 def store_migration_data(
