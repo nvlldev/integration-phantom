@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Any
 
 import voluptuous as vol
@@ -9,7 +10,7 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
-from .const import CONF_DEVICES, CONF_UPSTREAM_POWER_ENTITY, CONF_UPSTREAM_ENERGY_ENTITY, CONF_GROUPS, CONF_GROUP_NAME, DOMAIN
+from .const import CONF_DEVICES, CONF_UPSTREAM_POWER_ENTITY, CONF_UPSTREAM_ENERGY_ENTITY, CONF_GROUPS, CONF_GROUP_NAME, CONF_DEVICE_ID, DOMAIN
 from .state_migration import save_current_states_for_migration, create_migration_mapping, store_migration_data
 
 _LOGGER = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ def ws_get_config(
                 vol.Required(CONF_GROUP_NAME): str,
                 vol.Required(CONF_DEVICES): [
                     {
+                        vol.Optional(CONF_DEVICE_ID): str,
                         vol.Required("name"): str,
                         vol.Optional("power_entity", default=None): vol.Any(str, None),
                         vol.Optional("energy_entity", default=None): vol.Any(str, None),
@@ -113,6 +115,7 @@ def ws_save_config(
             name = device.get("name", "").strip()
             power_entity = device.get("power_entity") or None
             energy_entity = device.get("energy_entity") or None
+            device_id = device.get(CONF_DEVICE_ID)
             
             # Clean up empty strings
             if power_entity == "":
@@ -129,8 +132,14 @@ def ws_save_config(
             if not power_entity and not energy_entity:
                 _LOGGER.debug("Skipping device '%s' - no sensors configured", name)
                 continue
+            
+            # Generate UUID if not present
+            if not device_id:
+                device_id = str(uuid.uuid4())
+                _LOGGER.info("Generated new UUID for device '%s': %s", name, device_id)
                 
             valid_devices.append({
+                CONF_DEVICE_ID: device_id,
                 "name": name,
                 "power_entity": power_entity,
                 "energy_entity": energy_entity,

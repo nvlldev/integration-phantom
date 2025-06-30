@@ -26,6 +26,7 @@ from homeassistant.helpers import entity_registry as er
 
 from .const import (
     CONF_DEVICES,
+    CONF_DEVICE_ID,
     CONF_GROUPS,
     CONF_GROUP_NAME,
     CONF_UPSTREAM_POWER_ENTITY,
@@ -121,12 +122,14 @@ async def _create_group_sensors(
     
     for device in devices:
         device_name = device.get("name", "Unknown")
+        device_id = device.get(CONF_DEVICE_ID)
         power_entity = device.get("power_entity")
         energy_entity = device.get("energy_entity")
         
         _LOGGER.debug(
-            "Device '%s': power_entity=%s, energy_entity=%s",
+            "Device '%s' (id: %s): power_entity=%s, energy_entity=%s",
             device_name,
+            device_id,
             power_entity,
             energy_entity
         )
@@ -138,6 +141,7 @@ async def _create_group_sensors(
                 config_entry.entry_id,
                 group_name,
                 device_name,
+                device_id,
                 power_entity,
             )
             entities.append(individual_sensor)
@@ -153,6 +157,7 @@ async def _create_group_sensors(
                     config_entry.entry_id,
                     group_name,
                     device_name,
+                    device_id,
                     energy_entity,
                 )
             )
@@ -475,15 +480,17 @@ class PhantomIndividualPowerSensor(PhantomBaseSensor):
         config_entry_id: str,
         group_name: str,
         device_name: str,
+        device_id: str,
         power_entity: str,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(
             config_entry_id, 
             group_name, 
-            f"power_{sanitize_name(device_name)}"
+            f"power_{device_id}"
         )
         self._device_name = device_name
+        self._device_id = device_id
         self._power_entity = power_entity
         self._attr_name = f"{device_name} Power"
     
@@ -553,16 +560,18 @@ class PhantomUtilityMeterSensor(PhantomBaseSensor, RestoreEntity):
         config_entry_id: str,
         group_name: str,
         device_name: str,
+        device_id: str,
         energy_entity: str,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(
             config_entry_id,
             group_name,
-            f"utility_meter_{sanitize_name(device_name)}"
+            f"utility_meter_{device_id}"
         )
         self._hass = hass
         self._device_name = device_name
+        self._device_id = device_id
         self._energy_entity = energy_entity
         self._attr_name = f"{device_name} Energy Meter"
         self._last_value = None
