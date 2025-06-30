@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.typing import ConfigType
 
 from .const import CONF_DEVICES, CONF_UPSTREAM_POWER_ENTITY, CONF_UPSTREAM_ENERGY_ENTITY, CONF_GROUPS, CONF_GROUP_NAME, DOMAIN
-from .device_cleanup import async_cleanup_devices_and_entities
+from .state_migration import async_save_states_before_reload
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -116,35 +116,52 @@ def ws_save_config(
     groups = msg["groups"]
     valid_groups = []
     
+    _LOGGER.debug("Validating %d groups", len(groups))
+    
     for group in groups:
         group_name = group.get(CONF_GROUP_NAME, "").strip()
         if not group_name:
+            _LOGGER.debug("Skipping group with empty name")
             continue
             
         # Validate devices in group
         devices = group.get(CONF_DEVICES, [])
         valid_devices = []
         
+        _LOGGER.debug("Group '%s' has %d devices", group_name, len(devices))
+        
         for device in devices:
             name = device.get("name", "").strip()
             power_entity = device.get("power_entity") or None
             energy_entity = device.get("energy_entity") or None
             
-            # Skip devices without name or sensors
-            if not name or (not power_entity and not energy_entity):
-                continue
-                
             # Clean up empty strings
             if power_entity == "":
                 power_entity = None
             if energy_entity == "":
                 energy_entity = None
+            
+            # Skip devices without name
+            if not name:
+                _LOGGER.debug("Skipping device with empty name")
+                continue
+            
+            # Skip devices without any sensors
+            if not power_entity and not energy_entity:
+                _LOGGER.debug("Skipping device '%s' - no sensors configured", name)
+                continue
                 
             valid_devices.append({
                 "name": name,
                 "power_entity": power_entity,
                 "energy_entity": energy_entity,
             })
+            _LOGGER.debug(
+                "Added device '%s' with power=%s, energy=%s",
+                name,
+                power_entity,
+                energy_entity
+            )
         
         # Clean up upstream entities
         upstream_power = group.get(CONF_UPSTREAM_POWER_ENTITY) or None
@@ -161,9 +178,25 @@ def ws_save_config(
             CONF_UPSTREAM_POWER_ENTITY: upstream_power,
             CONF_UPSTREAM_ENERGY_ENTITY: upstream_energy,
         })
+        
+        _LOGGER.debug(
+            "Group '%s' validated: %d devices, upstream_power=%s, upstream_energy=%s",
+            group_name,
+            len(valid_devices),
+            upstream_power,
+            upstream_energy
+        )
     
     # Prepare new configuration
     new_data = {CONF_GROUPS: valid_groups}
+    
+    # Get old configuration before updating
+    old_data = dict(hass.data[DOMAIN][config_entry.entry_id])
+    
+    # Save states before reload for migration
+    hass.async_create_task(
+        async_save_states_before_reload(hass, config_entry.entry_id, old_data, new_data)
+    )
     
     # Update config entry
     hass.config_entries.async_update_entry(config_entry, data=new_data)
@@ -172,16 +205,17 @@ def ws_save_config(
     hass.data[DOMAIN][config_entry.entry_id] = new_data
     
     _LOGGER.info("Phantom configuration updated: %d groups configured", len(valid_groups))
+    for i, group in enumerate(valid_groups):
+        _LOGGER.info(
+            "  Group %d: '%s' with %d devices",
+            i + 1,
+            group[CONF_GROUP_NAME],
+            len(group[CONF_DEVICES])
+        )
     
     # Send success response
     connection.send_result(msg["id"], {"success": True})
     
-    # Schedule cleanup and reload after sending the response
-    async def _cleanup_and_reload():
-        """Clean up old devices and reload the integration with new config."""
-        # First clean up devices/entities that no longer exist
-        await async_cleanup_devices_and_entities(hass, config_entry.entry_id, new_data)
-        # Then reload the integration
-        await hass.config_entries.async_reload(config_entry.entry_id)
-    
-    hass.async_create_task(_cleanup_and_reload())
+    # Just reload the integration - no cleanup needed
+    _LOGGER.info("Configuration saved, reloading integration")
+    hass.async_create_task(hass.config_entries.async_reload(config_entry.entry_id))

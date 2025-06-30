@@ -1,5 +1,5 @@
 // Phantom Power Monitoring Panel
-console.log("[Phantom] Loading panel v3.0...");
+console.log("[Phantom] Loading panel v5.0...");
 
 class PhantomConfigPanel extends HTMLElement {
   constructor() {
@@ -256,8 +256,104 @@ class PhantomConfigPanel extends HTMLElement {
         const entity = device[`${type}_entity`];
         if (entity) used.add(entity);
       });
+      // Also include upstream entities
+      if (type === 'power' && group.upstream_power_entity) {
+        used.add(group.upstream_power_entity);
+      }
+      if (type === 'energy' && group.upstream_energy_entity) {
+        used.add(group.upstream_energy_entity);
+      }
     });
     return used;
+  }
+
+  getUsedEntitiesInCurrentGroup(type) {
+    const used = new Set();
+    if (this.selectedGroupIndex >= 0) {
+      const group = this.groups[this.selectedGroupIndex];
+      
+      // Add all device entities of this type
+      group.devices.forEach(device => {
+        const entity = device[`${type}_entity`];
+        if (entity) used.add(entity);
+      });
+      
+      // Add upstream entities
+      if (type === 'power' && group.upstream_power_entity) {
+        used.add(group.upstream_power_entity);
+      }
+      if (type === 'energy' && group.upstream_energy_entity) {
+        used.add(group.upstream_energy_entity);
+      }
+    }
+    return used;
+  }
+
+  isEntityFromPhantom(entity) {
+    // Check if this entity is created by our integration
+    // Entity IDs follow pattern: sensor.phantom_{group}_{type}
+    // Also check attributes to be more accurate
+    if (entity.entity_id.startsWith("sensor.phantom_")) {
+      return true;
+    }
+    
+    // Also check if the entity belongs to a Phantom device
+    if (entity.attributes && entity.attributes.device_class) {
+      const device_id = entity.attributes.device_id;
+      if (device_id && this._hass && this._hass.devices) {
+        const device = this._hass.devices[device_id];
+        if (device && device.manufacturer === "Phantom") {
+          return true;
+        }
+      }
+    }
+    
+    return false;
+  }
+
+  filterEntitiesForDevice(entities, type, currentDeviceIndex) {
+    const usedInGroup = this.getUsedEntitiesInCurrentGroup(type);
+    const group = this.groups[this.selectedGroupIndex];
+    const currentDevice = group.devices[currentDeviceIndex];
+    const currentValue = currentDevice[`${type}_entity`];
+    
+    return entities.filter(entity => {
+      // Exclude entities from our own integration
+      if (this.isEntityFromPhantom(entity)) return false;
+      
+      // Include the currently selected entity
+      if (entity.entity_id === currentValue) return true;
+      
+      // Exclude entities already used in this group
+      if (usedInGroup.has(entity.entity_id)) return false;
+      
+      return true;
+    });
+  }
+
+  filterEntitiesForUpstream(entities, type) {
+    const usedInGroup = this.getUsedEntitiesInCurrentGroup(type);
+    const group = this.groups[this.selectedGroupIndex];
+    const currentValue = type === 'power' ? group.upstream_power_entity : group.upstream_energy_entity;
+    
+    return entities.filter(entity => {
+      // Exclude entities from our own integration
+      if (this.isEntityFromPhantom(entity)) return false;
+      
+      // Include the currently selected entity
+      if (entity.entity_id === currentValue) return true;
+      
+      // Exclude entities already used as devices in this group
+      let usedAsDevice = false;
+      group.devices.forEach(device => {
+        if (device[`${type}_entity`] === entity.entity_id) {
+          usedAsDevice = true;
+        }
+      });
+      if (usedAsDevice) return false;
+      
+      return true;
+    });
   }
 
   render() {
@@ -344,8 +440,6 @@ class PhantomConfigPanel extends HTMLElement {
     const group = this.groups[this.selectedGroupIndex];
     const powerEntities = this.getPowerEntities();
     const energyEntities = this.getEnergyEntities();
-    const usedPowerEntities = this.getUsedEntities("power");
-    const usedEnergyEntities = this.getUsedEntities("energy");
 
     this.innerHTML = `
       <style>
@@ -392,44 +486,49 @@ class PhantomConfigPanel extends HTMLElement {
             <p style="text-align: center; color: var(--secondary-text-color); padding: 40px;">
               No devices configured. Add your first device to start monitoring.
             </p>
-          ` : group.devices.map((device, index) => `
-            <div class="device-card">
-              <div class="device-header">
-                <strong>Device ${index + 1}: ${device.name || 'Unnamed'}</strong>
-                <button class="delete-device-btn" data-index="${index}">Delete</button>
+          ` : group.devices.map((device, index) => {
+            const filteredPowerEntities = this.filterEntitiesForDevice(powerEntities, 'power', index);
+            const filteredEnergyEntities = this.filterEntitiesForDevice(energyEntities, 'energy', index);
+            
+            return `
+              <div class="device-card">
+                <div class="device-header">
+                  <strong>Device ${index + 1}: ${device.name || 'Unnamed'}</strong>
+                  <button class="delete-device-btn" data-index="${index}">Delete</button>
+                </div>
+                
+                <div class="device-row">
+                  <label>Name:</label>
+                  <input class="device-name" data-index="${index}" value="${device.name || ''}" 
+                         placeholder="Enter device name">
+                </div>
+                
+                <div class="device-row">
+                  <label>Power Sensor:</label>
+                  <select class="device-power" data-index="${index}">
+                    <option value="">Select power sensor (optional)</option>
+                    ${filteredPowerEntities.map(entity => 
+                      `<option value="${entity.entity_id}" ${device.power_entity === entity.entity_id ? 'selected' : ''}>
+                        ${entity.attributes.friendly_name || entity.entity_id}
+                      </option>`
+                    ).join('')}
+                  </select>
+                </div>
+                
+                <div class="device-row">
+                  <label>Energy Sensor:</label>
+                  <select class="device-energy" data-index="${index}">
+                    <option value="">Select energy sensor (optional)</option>
+                    ${filteredEnergyEntities.map(entity => 
+                      `<option value="${entity.entity_id}" ${device.energy_entity === entity.entity_id ? 'selected' : ''}>
+                        ${entity.attributes.friendly_name || entity.entity_id}
+                      </option>`
+                    ).join('')}
+                  </select>
+                </div>
               </div>
-              
-              <div class="device-row">
-                <label>Name:</label>
-                <input class="device-name" data-index="${index}" value="${device.name || ''}" 
-                       placeholder="Enter device name">
-              </div>
-              
-              <div class="device-row">
-                <label>Power Sensor:</label>
-                <select class="device-power" data-index="${index}">
-                  <option value="">Select power sensor (optional)</option>
-                  ${powerEntities.map(entity => 
-                    `<option value="${entity.entity_id}" ${device.power_entity === entity.entity_id ? 'selected' : ''}>
-                      ${entity.attributes.friendly_name || entity.entity_id}
-                    </option>`
-                  ).join('')}
-                </select>
-              </div>
-              
-              <div class="device-row">
-                <label>Energy Sensor:</label>
-                <select class="device-energy" data-index="${index}">
-                  <option value="">Select energy sensor (optional)</option>
-                  ${energyEntities.map(entity => 
-                    `<option value="${entity.entity_id}" ${device.energy_entity === entity.entity_id ? 'selected' : ''}>
-                      ${entity.attributes.friendly_name || entity.entity_id}
-                    </option>`
-                  ).join('')}
-                </select>
-              </div>
-            </div>
-          `).join('')}
+            `;
+          }).join('')}
           
           <div class="add-device">
             <div style="font-size: 24px; color: var(--primary-color);">+</div>
@@ -447,8 +546,7 @@ class PhantomConfigPanel extends HTMLElement {
             <label>Upstream Power:</label>
             <select class="upstream-power">
               <option value="">Select upstream power entity (optional)</option>
-              ${powerEntities
-                .filter(entity => !usedPowerEntities.has(entity.entity_id))
+              ${this.filterEntitiesForUpstream(powerEntities, 'power')
                 .map(entity => 
                   `<option value="${entity.entity_id}" ${group.upstream_power_entity === entity.entity_id ? 'selected' : ''}>
                     ${entity.attributes.friendly_name || entity.entity_id}
@@ -461,8 +559,7 @@ class PhantomConfigPanel extends HTMLElement {
             <label>Upstream Energy:</label>
             <select class="upstream-energy">
               <option value="">Select upstream energy entity (optional)</option>
-              ${energyEntities
-                .filter(entity => !usedEnergyEntities.has(entity.entity_id))
+              ${this.filterEntitiesForUpstream(energyEntities, 'energy')
                 .map(entity => 
                   `<option value="${entity.entity_id}" ${group.upstream_energy_entity === entity.entity_id ? 'selected' : ''}>
                     ${entity.attributes.friendly_name || entity.entity_id}

@@ -22,6 +22,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.helpers import entity_registry as er
 
 from .const import (
     CONF_DEVICES,
@@ -31,6 +32,8 @@ from .const import (
     CONF_UPSTREAM_ENERGY_ENTITY,
     DOMAIN,
 )
+from .state_migration import get_migrated_state, clear_migration_data
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,7 +44,9 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the Phantom sensors."""
+    _LOGGER.info("Setting up Phantom sensors for config entry: %s", config_entry.entry_id)
     config = hass.data[DOMAIN][config_entry.entry_id]
+    _LOGGER.debug("Config data: %s", config)
     
     entities = []
     
@@ -49,7 +54,7 @@ async def async_setup_entry(
     if CONF_GROUPS in config:
         # New format - multiple groups
         groups = config.get(CONF_GROUPS, [])
-        _LOGGER.debug("Setting up Phantom sensors for %d groups", len(groups))
+        _LOGGER.info("Setting up Phantom sensors for %d groups", len(groups))
         
         for group_index, group in enumerate(groups):
             group_name = group.get(CONF_GROUP_NAME, f"Group {group_index + 1}")
@@ -57,18 +62,29 @@ async def async_setup_entry(
             upstream_power_entity = group.get(CONF_UPSTREAM_POWER_ENTITY)
             upstream_energy_entity = group.get(CONF_UPSTREAM_ENERGY_ENTITY)
             
-            _LOGGER.debug("Setting up group '%s' with %d devices", group_name, len(devices))
+            _LOGGER.info(
+                "Setting up group '%s' (index %d) with %d devices, upstream_power=%s, upstream_energy=%s",
+                group_name,
+                group_index,
+                len(devices),
+                upstream_power_entity,
+                upstream_energy_entity
+            )
             
             # Create sensors for this group
-            group_entities = await _create_group_sensors(
-                hass,
-                config_entry,
-                group_name,
-                devices,
-                upstream_power_entity,
-                upstream_energy_entity,
-            )
-            entities.extend(group_entities)
+            try:
+                group_entities = await _create_group_sensors(
+                    hass,
+                    config_entry,
+                    group_name,
+                    devices,
+                    upstream_power_entity,
+                    upstream_energy_entity,
+                )
+                _LOGGER.info("Created %d entities for group '%s'", len(group_entities), group_name)
+                entities.extend(group_entities)
+            except Exception as e:
+                _LOGGER.error("Error creating sensors for group '%s': %s", group_name, e, exc_info=True)
     else:
         # Old format - single group (backward compatibility)
         devices = config.get(CONF_DEVICES, [])
@@ -90,6 +106,8 @@ async def async_setup_entry(
     # Add all entities
     if entities:
         async_add_entities(entities)
+        # Clear migration data after entities are created
+        clear_migration_data(hass, config_entry.entry_id)
     else:
         _LOGGER.warning("No entities created for Phantom integration")
 
@@ -103,6 +121,7 @@ async def _create_group_sensors(
     upstream_energy_entity: str | None,
 ) -> list[SensorEntity]:
     """Create sensors for a single group."""
+    _LOGGER.debug("Creating sensors for group '%s'", group_name)
     entities = []
     
     # Collect power and energy entities from devices
@@ -110,10 +129,19 @@ async def _create_group_sensors(
     energy_entities = []
     individual_power_entities = []
     
+    _LOGGER.debug("Processing %d devices for group '%s'", len(devices), group_name)
+    
     for device in devices:
         device_name = device.get("name", "Unknown")
         power_entity = device.get("power_entity")
         energy_entity = device.get("energy_entity")
+        
+        _LOGGER.debug(
+            "Device '%s': power_entity=%s, energy_entity=%s",
+            device_name,
+            power_entity,
+            energy_entity
+        )
         
         if power_entity:
             power_entities.append(power_entity)
@@ -126,6 +154,7 @@ async def _create_group_sensors(
             )
             entities.append(individual_sensor)
             individual_power_entities.append(individual_sensor)
+            _LOGGER.debug("Created individual power sensor for device '%s'", device_name)
         
         if energy_entity:
             energy_entities.append(energy_entity)
@@ -139,6 +168,7 @@ async def _create_group_sensors(
                     energy_entity,
                 )
             )
+            _LOGGER.debug("Created utility meter sensor for device '%s'", device_name)
     
     # Create group power total sensor
     if power_entities:
@@ -149,6 +179,9 @@ async def _create_group_sensors(
                 power_entities,
             )
         )
+        _LOGGER.debug("Created power total sensor for group '%s'", group_name)
+    else:
+        _LOGGER.debug("No power entities for group '%s', skipping power total sensor", group_name)
     
     # Create group energy total sensor
     if energy_entities:
@@ -160,6 +193,9 @@ async def _create_group_sensors(
                 devices,
             )
         )
+        _LOGGER.debug("Created energy total sensor for group '%s'", group_name)
+    else:
+        _LOGGER.debug("No energy entities for group '%s', skipping energy total sensor", group_name)
     
     # Create upstream sensors if configured
     if upstream_power_entity:
@@ -170,6 +206,7 @@ async def _create_group_sensors(
                 upstream_power_entity,
             )
         )
+        _LOGGER.debug("Created upstream power sensor for group '%s'", group_name)
         
         # Create power remainder if we have both upstream and group power
         if power_entities:
@@ -181,6 +218,7 @@ async def _create_group_sensors(
                     power_entities,
                 )
             )
+            _LOGGER.debug("Created power remainder sensor for group '%s'", group_name)
     
     if upstream_energy_entity:
         entities.append(
@@ -191,6 +229,7 @@ async def _create_group_sensors(
                 upstream_energy_entity,
             )
         )
+        _LOGGER.debug("Created upstream energy meter sensor for group '%s'", group_name)
         
         # Create energy remainder if we have both upstream and group energy
         if energy_entities:
@@ -203,7 +242,9 @@ async def _create_group_sensors(
                     devices,
                 )
             )
+            _LOGGER.debug("Created energy remainder sensor for group '%s'", group_name)
     
+    _LOGGER.info("Created total of %d entities for group '%s'", len(entities), group_name)
     return entities
 
 
@@ -238,6 +279,7 @@ class PhantomBaseSensor(SensorEntity):
             name=f"Phantom {self._group_name}",
             manufacturer="Phantom",
             model="Power Monitor",
+            # configuration_url="/phantom",  # Temporarily disabled due to validation error
         )
 
 
@@ -377,7 +419,7 @@ class PhantomEnergySensor(PhantomBaseSensor, RestoreEntity):
     
     async def _find_utility_meter_entities(self) -> list[str]:
         """Find utility meter entities for this group's devices."""
-        entity_registry = self.hass.helpers.entity_registry.async_get()
+        entity_registry = er.async_get(self.hass)
         utility_meters = []
         
         for device in self._devices:
@@ -507,6 +549,14 @@ class PhantomUtilityMeterSensor(PhantomBaseSensor, RestoreEntity):
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_icon = "mdi:counter"
     
+    @property
+    def extra_state_attributes(self):
+        """Return extra state attributes."""
+        return {
+            "last_value": self._last_value,
+            "source_entity": self._energy_entity,
+        }
+    
     def __init__(
         self,
         hass: HomeAssistant,
@@ -530,9 +580,51 @@ class PhantomUtilityMeterSensor(PhantomBaseSensor, RestoreEntity):
     
     async def async_added_to_hass(self) -> None:
         """Handle entity added to hass."""
-        # Don't restore state - always start at 0
-        self._total_consumed = 0.0
-        self._attr_native_value = 0.0
+        # Check for migrated state first (from rename)
+        migrated_state = get_migrated_state(self._hass, self._config_entry_id, self._attr_unique_id)
+        
+        if migrated_state:
+            try:
+                self._total_consumed = float(migrated_state["state"])
+                self._attr_native_value = self._total_consumed
+                # Restore last_value from attributes if available
+                if "last_value" in migrated_state.get("attributes", {}):
+                    self._last_value = float(migrated_state["attributes"]["last_value"])
+                _LOGGER.info(
+                    "Restored migrated state for %s: %s kWh (from rename)",
+                    self._device_name,
+                    self._total_consumed
+                )
+            except (ValueError, TypeError) as e:
+                _LOGGER.warning("Failed to restore migrated state: %s", e)
+                self._total_consumed = 0.0
+                self._attr_native_value = 0.0
+        else:
+            # Try to restore from previous state (normal restart)
+            if (last_state := await self.async_get_last_state()) is not None:
+                if last_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                    try:
+                        self._total_consumed = float(last_state.state)
+                        self._attr_native_value = self._total_consumed
+                        _LOGGER.info(
+                            "Restored utility meter for %s: %s kWh",
+                            self._device_name,
+                            self._total_consumed
+                        )
+                    except (ValueError, TypeError):
+                        _LOGGER.warning(
+                            "Could not restore state for %s: %s",
+                            self._device_name,
+                            last_state.state
+                        )
+                        self._total_consumed = 0.0
+                        self._attr_native_value = 0.0
+                else:
+                    self._total_consumed = 0.0
+                    self._attr_native_value = 0.0
+            else:
+                self._total_consumed = 0.0
+                self._attr_native_value = 0.0
         
         # Get initial state
         state = self.hass.states.get(self._energy_entity)
@@ -544,6 +636,18 @@ class PhantomUtilityMeterSensor(PhantomBaseSensor, RestoreEntity):
                     self._last_value = self._last_value / 1000
             except (ValueError, TypeError):
                 self._last_value = None
+        
+        # Also try to restore the last tracked value from attributes
+        if last_state and "last_value" in last_state.attributes:
+            try:
+                self._last_value = float(last_state.attributes["last_value"])
+                _LOGGER.debug(
+                    "Restored last tracked value for %s: %s",
+                    self._device_name,
+                    self._last_value
+                )
+            except (ValueError, TypeError):
+                pass
         
         self.async_on_remove(
             async_track_state_change_event(
@@ -653,6 +757,14 @@ class PhantomUpstreamEnergyMeterSensor(PhantomBaseSensor, RestoreEntity):
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_icon = "mdi:transmission-tower"
     
+    @property
+    def extra_state_attributes(self):
+        """Return extra state attributes."""
+        return {
+            "last_value": self._last_value,
+            "source_entity": self._upstream_entity,
+        }
+    
     def __init__(
         self,
         hass: HomeAssistant,
@@ -670,9 +782,48 @@ class PhantomUpstreamEnergyMeterSensor(PhantomBaseSensor, RestoreEntity):
     
     async def async_added_to_hass(self) -> None:
         """Handle entity added to hass."""
-        # Don't restore state - always start at 0
-        self._total_consumed = 0.0
-        self._attr_native_value = 0.0
+        # Check for migrated state first (from rename)
+        migrated_state = get_migrated_state(self._hass, self._config_entry_id, self._attr_unique_id)
+        
+        if migrated_state:
+            try:
+                self._total_consumed = float(migrated_state["state"])
+                self._attr_native_value = self._total_consumed
+                # Restore last_value from attributes if available
+                if "last_value" in migrated_state.get("attributes", {}):
+                    self._last_value = float(migrated_state["attributes"]["last_value"])
+                _LOGGER.info(
+                    "Restored migrated upstream energy: %s kWh (from rename)",
+                    self._total_consumed
+                )
+            except (ValueError, TypeError) as e:
+                _LOGGER.warning("Failed to restore migrated state: %s", e)
+                self._total_consumed = 0.0
+                self._attr_native_value = 0.0
+        else:
+            # Try to restore from previous state (normal restart)
+            if (last_state := await self.async_get_last_state()) is not None:
+                if last_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                    try:
+                        self._total_consumed = float(last_state.state)
+                        self._attr_native_value = self._total_consumed
+                        _LOGGER.info(
+                            "Restored upstream energy meter: %s kWh",
+                            self._total_consumed
+                        )
+                    except (ValueError, TypeError):
+                        _LOGGER.warning(
+                            "Could not restore upstream energy state: %s",
+                            last_state.state
+                        )
+                        self._total_consumed = 0.0
+                        self._attr_native_value = 0.0
+                else:
+                    self._total_consumed = 0.0
+                    self._attr_native_value = 0.0
+            else:
+                self._total_consumed = 0.0
+                self._attr_native_value = 0.0
         
         # Get initial state
         state = self.hass.states.get(self._upstream_entity)
@@ -684,6 +835,17 @@ class PhantomUpstreamEnergyMeterSensor(PhantomBaseSensor, RestoreEntity):
                     self._last_value = self._last_value / 1000
             except (ValueError, TypeError):
                 self._last_value = None
+        
+        # Also try to restore the last tracked value from attributes
+        if last_state and "last_value" in last_state.attributes:
+            try:
+                self._last_value = float(last_state.attributes["last_value"])
+                _LOGGER.debug(
+                    "Restored last tracked value for upstream: %s",
+                    self._last_value
+                )
+            except (ValueError, TypeError):
+                pass
         
         self.async_on_remove(
             async_track_state_change_event(
@@ -897,7 +1059,7 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor):
     
     async def _find_upstream_meter_entity(self) -> str | None:
         """Find the upstream meter entity."""
-        entity_registry = self.hass.helpers.entity_registry.async_get()
+        entity_registry = er.async_get(self.hass)
         
         # Generate expected unique ID for upstream meter
         expected_unique_id = f"{self._config_entry_id}_{_sanitize_name(self._group_name)}_upstream_energy_meter"
@@ -931,7 +1093,7 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor):
     
     async def _find_utility_meter_entities(self) -> list[str]:
         """Find utility meter entities for devices."""
-        entity_registry = self.hass.helpers.entity_registry.async_get()
+        entity_registry = er.async_get(self.hass)
         utility_meters = []
         
         for device in self._devices:

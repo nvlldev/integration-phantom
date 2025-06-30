@@ -12,8 +12,8 @@ from homeassistant.helpers.typing import ConfigType
 
 from .api import async_setup_api
 from .const import DOMAIN
-from .device_cleanup import async_cleanup_devices_and_entities
 from .panel import async_register_panel
+from .cleanup import async_cleanup_orphaned_devices
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,19 +35,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if entry.options:
         config.update(entry.options)
     
+    _LOGGER.info("Loading Phantom config for entry %s: %s", entry.entry_id, config)
     hass.data[DOMAIN][entry.entry_id] = config
-
-    # Create device registry entry
-    device_registry = dr.async_get(hass)
-    
-    device_registry.async_get_or_create(
-        config_entry_id=entry.entry_id,
-        identifiers={(DOMAIN, entry.entry_id)},
-        name=entry.title,
-        manufacturer="Phantom",
-        model="Power Monitor",
-        sw_version="1.0.0",
-    )
 
     # Set up API
     async_setup_api(hass)
@@ -55,9 +44,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Register custom panel
     await async_register_panel(hass)
     
-    # Clean up old devices/entities before setting up new ones
-    await async_cleanup_devices_and_entities(hass, entry.entry_id, config)
-
+    # Clean up orphaned devices before setting up new ones
+    await async_cleanup_orphaned_devices(hass, entry.entry_id, config)
+    
     # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     
