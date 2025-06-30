@@ -24,8 +24,6 @@ from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
     CONF_DEVICES,
-    CONF_ENERGY_ENTITIES,
-    CONF_POWER_ENTITIES,
     CONF_UPSTREAM_POWER_ENTITY,
     CONF_UPSTREAM_ENERGY_ENTITY,
     DOMAIN,
@@ -43,30 +41,18 @@ async def async_setup_entry(
     config = hass.data[DOMAIN][config_entry.entry_id]
     
     entities = []
-    
-    # Handle both new device-based config and legacy entity lists
     devices = config.get(CONF_DEVICES, [])
-    power_entities = config.get(CONF_POWER_ENTITIES, [])
-    energy_entities = config.get(CONF_ENERGY_ENTITIES, [])
     upstream_power_entity = config.get(CONF_UPSTREAM_POWER_ENTITY)
     upstream_energy_entity = config.get(CONF_UPSTREAM_ENERGY_ENTITY)
     
-    # If we have devices configuration, use that; otherwise fall back to legacy
-    if devices:
-        _LOGGER.debug("Using device-based configuration with %d devices", len(devices))
-        # Extract entity lists from devices for backward compatibility
-        if not power_entities:
-            power_entities = [device["power_entity"] for device in devices if device.get("power_entity")]
-        if not energy_entities:
-            energy_entities = [device["energy_entity"] for device in devices if device.get("energy_entity")]
-    else:
-        _LOGGER.debug("Using legacy entity list configuration")
-    
     _LOGGER.debug("Setting up Phantom sensors - config_entry_id: %s", config_entry.entry_id)
-    _LOGGER.debug("Power entities: %s", power_entities)
-    _LOGGER.debug("Energy entities: %s", energy_entities)
+    _LOGGER.debug("Devices: %s", devices)
     _LOGGER.debug("Upstream power: %s", upstream_power_entity)
     _LOGGER.debug("Upstream energy: %s", upstream_energy_entity)
+    
+    # Extract entity lists from devices
+    power_entities = [device["power_entity"] for device in devices if device.get("power_entity")]
+    energy_entities = [device["energy_entity"] for device in devices if device.get("energy_entity")]
     
     # Power sensors
     if power_entities:
