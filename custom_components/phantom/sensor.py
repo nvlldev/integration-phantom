@@ -431,17 +431,15 @@ class PhantomRemainderBaseSensor(SensorEntity, RestoreEntity):
             except (ValueError, TypeError):
                 _LOGGER.warning("Invalid upstream value for %s: %s", self._upstream_entity, upstream_state.state)
         
-        # Calculate remainder if both are available
+        # Remainder sensor is only available if BOTH conditions are met:
+        # 1. At least one group entity is available
+        # 2. Upstream entity is available
         if group_available > 0 and upstream_available:
             self._available = True
             remainder = upstream_value - group_total
             self._state = round(remainder, 3)
-        elif upstream_available:
-            # Only upstream available
-            self._available = True
-            self._state = round(upstream_value, 3)
         else:
-            # Not enough data
+            # Either no group entities or no upstream - sensor unavailable
             self._available = False
             self._state = None
         
