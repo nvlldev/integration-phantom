@@ -60,7 +60,7 @@ class HaPanelPhantom extends HTMLElement {
     if (target.classList.contains('delete-btn')) {
       const index = parseInt(target.dataset.index);
       this.removeDevice(index);
-    } else if (target.classList.contains('add-device')) {
+    } else if (target.closest('.add-device')) {
       this.addDevice();
     } else if (target.classList.contains('btn-primary')) {
       this.saveConfiguration();
@@ -231,9 +231,10 @@ class HaPanelPhantom extends HTMLElement {
 
       <div class="phantom-panel">
         <h1>⚡ Phantom Power Monitoring</h1>
-        <p style="color: var(--secondary-text-color); margin-bottom: 24px;">
-          Configure devices to monitor and group power/energy consumption. Each configuration creates a separate monitoring group.
-        </p>
+        <div style="background: var(--info-color, #039be5); color: white; padding: 16px; border-radius: 4px; margin-bottom: 24px;">
+          <strong>Note:</strong> This integration currently supports monitoring a single group of devices. 
+          All configured devices will be combined into one power monitoring group with total, remainder, and utility meter sensors.
+        </div>
 
         <div class="section">
           <h2>Devices (${this.devices.length})</h2>
