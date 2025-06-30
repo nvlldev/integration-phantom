@@ -106,8 +106,15 @@ async def async_setup_entry(
     # Add all entities
     if entities:
         async_add_entities(entities)
-        # Clear migration data after entities are created
-        clear_migration_data(hass, config_entry.entry_id)
+        
+        # Schedule clearing migration data after entities have been initialized
+        async def clear_migration_after_delay():
+            """Clear migration data after entities have had time to restore states."""
+            await asyncio.sleep(2.0)  # Give entities time to initialize and restore states
+            clear_migration_data(hass, config_entry.entry_id)
+            _LOGGER.debug("Cleared migration data after entity initialization")
+        
+        hass.async_create_task(clear_migration_after_delay())
     else:
         _LOGGER.warning("No entities created for Phantom integration")
 
