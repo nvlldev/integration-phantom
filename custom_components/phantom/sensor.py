@@ -359,10 +359,20 @@ class PhantomEnergySensor(PhantomBaseSensor):
                 except (ValueError, TypeError):
                     self._state = None
 
-        # Track utility meter entities instead of raw entities
+        # Set up a delay to allow utility meters to be registered first
+        self.hass.async_create_task(self._setup_tracking_with_delay())
+
+    async def _setup_tracking_with_delay(self) -> None:
+        """Set up tracking after a delay to allow utility meters to be created."""
+        import asyncio
+        
+        # Wait a bit for utility meters to be registered
+        await asyncio.sleep(2)
+        
+        # Find utility meter entities
         utility_meter_entities = self._find_utility_meter_entities()
         
-        _LOGGER.debug("Energy total tracking utility meter entities: %s", utility_meter_entities)
+        _LOGGER.debug("Energy total (delayed) tracking utility meter entities: %s", utility_meter_entities)
         
         if utility_meter_entities:
             self._unsubscribe_listeners.append(
@@ -1163,6 +1173,16 @@ class PhantomEnergyRemainderSensor(PhantomRemainderBaseSensor):
                 except (ValueError, TypeError):
                     self._state = None
 
+        # Set up a delay to allow utility meters to be registered first
+        self.hass.async_create_task(self._setup_tracking_with_delay())
+
+    async def _setup_tracking_with_delay(self) -> None:
+        """Set up tracking after a delay to allow utility meters to be created."""
+        import asyncio
+        
+        # Wait a bit for utility meters to be registered
+        await asyncio.sleep(2)
+        
         # Track utility meter entities instead of raw entities
         track_entities = []
         
@@ -1175,7 +1195,7 @@ class PhantomEnergyRemainderSensor(PhantomRemainderBaseSensor):
         if upstream_meter_entity:
             track_entities.append(upstream_meter_entity)
         
-        _LOGGER.debug("Energy remainder tracking entities: %s", track_entities)
+        _LOGGER.debug("Energy remainder (delayed) tracking entities: %s", track_entities)
         
         if track_entities:
             self._unsubscribe_listeners.append(
