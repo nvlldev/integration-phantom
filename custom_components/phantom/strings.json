@@ -1,70 +1,24 @@
 {
   "config": {
     "step": {
-      "device": {
-        "title": "Add Device",
-        "description": "Configure a device with power and/or energy sensors.\n\nDevices configured: {device_count}\nCurrent devices: {devices}",
+      "user": {
+        "title": "Setup Phantom Power Monitoring",
+        "description": "Phantom provides advanced power and energy monitoring with device grouping and remainder calculations.\n\nAfter installation, use the Phantom panel in the sidebar to configure your devices.",
         "data": {
-          "device_name": "Device name",
-          "power_entity": "Power sensor (Watts)",
-          "energy_entity": "Energy sensor (kWh)",
-          "add_another": "Add another device"
-        }
-      },
-      "upstream": {
-        "title": "Configure Upstream Entities",
-        "description": "Optionally select upstream entities to calculate remainder.\n\nConfigured devices:\n{devices}",
-        "data": {
-          "upstream_power_entity": "Upstream power entity",
-          "upstream_energy_entity": "Upstream energy entity"
+          "confirm": "Setup Phantom Power Monitoring"
         }
       }
     },
-    "error": {
-      "no_sensors_selected": "Please select at least one power or energy sensor",
-      "device_name_required": "Device name is required"
-    },
     "abort": {
-      "already_configured": "This configuration is already set up"
+      "already_configured": "Phantom Power Monitoring is already configured"
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "Phantom Power Monitoring Options",
-        "description": "Choose what you want to configure",
-        "data": {
-          "action": "Action"
-        }
-      },
-      "add_device": {
-        "title": "Add New Device",
-        "description": "Add a new device to monitor",
-        "data": {
-          "device_name": "Device name",
-          "power_entity": "Power sensor (Watts)",
-          "energy_entity": "Energy sensor (kWh)"
-        }
-      },
-      "manage_devices": {
-        "title": "Manage Devices",
-        "description": "Select which devices to keep (unselected devices will be removed)",
-        "data": {
-          "devices": "Devices to keep"
-        }
-      },
-      "upstream": {
-        "title": "Configure Upstream Entities",
-        "description": "Configure upstream entities for remainder calculations",
-        "data": {
-          "upstream_power_entity": "Upstream power entity",
-          "upstream_energy_entity": "Upstream energy entity"
-        }
+        "description": "Use the Phantom panel in the sidebar to configure devices and settings"
       }
-    },
-    "error": {
-      "no_sensors_selected": "Please select at least one power or energy sensor",
-      "device_name_required": "Device name is required"
     }
   }
 }

@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.typing import ConfigType
 
+from .api import async_setup_api
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -46,6 +47,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         sw_version="1.0.0",
     )
 
+    # Set up API
+    async_setup_api(hass)
+    
+    # Register custom panel
+    await _async_register_panel(hass)
+
     # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     
@@ -53,6 +60,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
     
     return True
+
+
+async def _async_register_panel(hass: HomeAssistant) -> None:
+    """Register the Phantom configuration panel."""
+    if "phantom-panel" not in hass.data.get("frontend_panels", {}):
+        hass.http.register_static_path(
+            "/api/phantom/panel", 
+            hass.config.path("custom_components/phantom/panel"), 
+            True
+        )
+        
+        await hass.components.frontend.async_register_built_in_panel(
+            component_name="custom",
+            sidebar_title="Phantom",
+            sidebar_icon="mdi:flash",
+            frontend_url_path="phantom",
+            config={
+                "js_url": "/api/phantom/panel/phantom-panel.js",
+                "embed_iframe": False,
+            },
+            require_admin=True,
+        )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
