@@ -319,13 +319,18 @@ class PhantomEnergySensor(PhantomBaseSensor):
         total = 0.0
         available_count = 0
         
+        _LOGGER.debug("Energy group sensor update - checking %d entities", len(self._entities))
+        
         for entity_id in self._entities:
             state = self.hass.states.get(entity_id)
+            _LOGGER.debug("Energy entity %s: %s", entity_id, state.state if state else "Not found")
+            
             if state and state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
                 try:
                     value = float(state.state)
                     total += value
                     available_count += 1
+                    _LOGGER.debug("Added %f from %s to energy total", value, entity_id)
                 except (ValueError, TypeError):
                     _LOGGER.warning("Invalid energy value for %s: %s", entity_id, state.state)
                     continue
@@ -333,9 +338,11 @@ class PhantomEnergySensor(PhantomBaseSensor):
         if available_count > 0:
             self._available = True
             self._state = round(total, 3)
+            _LOGGER.debug("Energy group total calculated: %f", self._state)
         else:
             self._available = False
             self._state = None
+            _LOGGER.debug("Energy group unavailable - no valid entities")
         
         self.async_write_ha_state()
 
@@ -866,6 +873,8 @@ class PhantomUpstreamEnergyMeterSensor(SensorEntity, RestoreEntity):
         """Run when entity about to be added to hass."""
         await super().async_added_to_hass()
         
+        _LOGGER.debug("Upstream energy meter sensor %s added to hass for source %s", self.unique_id, self._upstream_entity_id)
+        
         # Restore state
         if last_state := await self.async_get_last_state():
             if last_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
@@ -889,6 +898,7 @@ class PhantomUpstreamEnergyMeterSensor(SensorEntity, RestoreEntity):
                         baseline_value = baseline_value / 1000.0
                     self._baseline_value = baseline_value
                     self._last_source_value = self._baseline_value
+                    _LOGGER.debug("Set baseline for upstream %s: %f", self._upstream_entity_id, self._baseline_value)
                 except (ValueError, TypeError):
                     self._baseline_value = 0.0
                     self._last_source_value = 0.0
@@ -1023,6 +1033,8 @@ class PhantomEnergyRemainderSensor(PhantomRemainderBaseSensor):
         """Run when entity about to be added to hass."""
         await super().async_added_to_hass()
         
+        _LOGGER.debug("Energy remainder sensor %s added to hass", self.unique_id)
+        
         # Restore last state
         if last_state := await self.async_get_last_state():
             if last_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
@@ -1034,39 +1046,81 @@ class PhantomEnergyRemainderSensor(PhantomRemainderBaseSensor):
         # Track utility meter entities instead of raw entities
         track_entities = []
         
-        # Add individual utility meter entities
-        for entity_id in self._entities:
-            clean_id = entity_id.replace(".", "_")
-            meter_id = f"sensor.{self._config_entry.entry_id}_meter_{clean_id}"
-            track_entities.append(meter_id)
+        # Find actual utility meter entity IDs
+        utility_meter_entities = self._find_utility_meter_entities()
+        track_entities.extend(utility_meter_entities)
         
-        # Add upstream utility meter entity
-        upstream_meter_id = f"sensor.{self._config_entry.entry_id}_upstream_energy_meter"
-        track_entities.append(upstream_meter_id)
+        # Find upstream utility meter entity
+        upstream_meter_entity = self._find_upstream_meter_entity()
+        if upstream_meter_entity:
+            track_entities.append(upstream_meter_entity)
         
-        self._unsubscribe_listeners.append(
-            async_track_state_change_event(
-                self.hass,
-                track_entities,
-                self._async_state_changed,
+        _LOGGER.debug("Energy remainder tracking entities: %s", track_entities)
+        
+        if track_entities:
+            self._unsubscribe_listeners.append(
+                async_track_state_change_event(
+                    self.hass,
+                    track_entities,
+                    self._async_state_changed,
+                )
             )
-        )
         
         # Initial state update
         await self._async_update_state()
 
+    def _find_utility_meter_entities(self) -> list[str]:
+        """Find utility meter entity IDs by searching the entity registry."""
+        from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
+        
+        entity_registry = async_get_entity_registry(self.hass)
+        utility_meter_entities = []
+        
+        # Look for entities with our unique IDs
+        for entity_id in self._entities:
+            clean_id = entity_id.replace(".", "_")
+            expected_unique_id = f"{self._config_entry.entry_id}_meter_{clean_id}"
+            
+            # Find entity with this unique ID
+            for ent_id, entry in entity_registry.entities.items():
+                if entry.unique_id == expected_unique_id:
+                    utility_meter_entities.append(ent_id)
+                    _LOGGER.debug("Found utility meter entity: %s (unique_id: %s)", ent_id, expected_unique_id)
+                    break
+            else:
+                _LOGGER.debug("Could not find utility meter entity for unique_id: %s", expected_unique_id)
+        
+        return utility_meter_entities
+
+    def _find_upstream_meter_entity(self) -> str | None:
+        """Find upstream energy meter entity ID."""
+        from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
+        
+        entity_registry = async_get_entity_registry(self.hass)
+        expected_unique_id = f"{self._config_entry.entry_id}_upstream_energy_meter"
+        
+        # Find entity with this unique ID
+        for ent_id, entry in entity_registry.entities.items():
+            if entry.unique_id == expected_unique_id:
+                _LOGGER.debug("Found upstream meter entity: %s (unique_id: %s)", ent_id, expected_unique_id)
+                return ent_id
+        
+        _LOGGER.debug("Could not find upstream meter entity for unique_id: %s", expected_unique_id)
+        return None
+
     async def _async_update_state(self) -> None:
         """Update the energy remainder sensor state using utility meter values."""
+        # Find utility meter entities
+        utility_meter_entities = self._find_utility_meter_entities()
+        upstream_meter_entity = self._find_upstream_meter_entity()
+        
         # Calculate group total from utility meters
         group_total = 0.0
         group_available = 0
         
-        _LOGGER.debug("Energy remainder update - checking %d entities", len(self._entities))
+        _LOGGER.debug("Energy remainder update - found %d utility meter entities", len(utility_meter_entities))
         
-        for entity_id in self._entities:
-            # Get the utility meter for this entity
-            clean_id = entity_id.replace(".", "_")
-            meter_id = f"sensor.{self._config_entry.entry_id}_meter_{clean_id}"
+        for meter_id in utility_meter_entities:
             state = self.hass.states.get(meter_id)
             
             _LOGGER.debug("Checking utility meter %s: %s", meter_id, state.state if state else "Not found")
@@ -1082,20 +1136,22 @@ class PhantomEnergyRemainderSensor(PhantomRemainderBaseSensor):
                     continue
         
         # Get upstream utility meter value
-        upstream_meter_id = f"sensor.{self._config_entry.entry_id}_upstream_energy_meter"
-        upstream_state = self.hass.states.get(upstream_meter_id)
         upstream_value = None
         upstream_available = False
         
-        _LOGGER.debug("Checking upstream meter %s: %s", upstream_meter_id, upstream_state.state if upstream_state else "Not found")
-        
-        if upstream_state and upstream_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-            try:
-                upstream_value = float(upstream_state.state)
-                upstream_available = True
-                _LOGGER.debug("Upstream meter value: %f", upstream_value)
-            except (ValueError, TypeError):
-                _LOGGER.warning("Invalid upstream meter value for %s: %s", upstream_meter_id, upstream_state.state)
+        if upstream_meter_entity:
+            upstream_state = self.hass.states.get(upstream_meter_entity)
+            _LOGGER.debug("Checking upstream meter %s: %s", upstream_meter_entity, upstream_state.state if upstream_state else "Not found")
+            
+            if upstream_state and upstream_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                try:
+                    upstream_value = float(upstream_state.state)
+                    upstream_available = True
+                    _LOGGER.debug("Upstream meter value: %f", upstream_value)
+                except (ValueError, TypeError):
+                    _LOGGER.warning("Invalid upstream meter value for %s: %s", upstream_meter_entity, upstream_state.state)
+        else:
+            _LOGGER.debug("No upstream meter entity found")
         
         _LOGGER.debug("Energy remainder: group_available=%d, upstream_available=%s", group_available, upstream_available)
         
@@ -1246,6 +1302,8 @@ class PhantomUtilityMeterSensor(SensorEntity, RestoreEntity):
         """Run when entity about to be added to hass."""
         await super().async_added_to_hass()
         
+        _LOGGER.debug("Utility meter sensor %s added to hass for source %s", self.unique_id, self._source_entity_id)
+        
         # Restore state
         if last_state := await self.async_get_last_state():
             if last_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
@@ -1269,6 +1327,7 @@ class PhantomUtilityMeterSensor(SensorEntity, RestoreEntity):
                         baseline_value = baseline_value / 1000.0
                     self._baseline_value = baseline_value
                     self._last_source_value = self._baseline_value
+                    _LOGGER.debug("Set baseline for %s: %f", self._source_entity_id, self._baseline_value)
                 except (ValueError, TypeError):
                     self._baseline_value = 0.0
                     self._last_source_value = 0.0
