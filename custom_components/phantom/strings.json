@@ -3,10 +3,22 @@
     "step": {
       "user": {
         "title": "Setup Phantom Power Monitoring",
-        "description": "Select power and energy entities to monitor",
+        "description": "Add devices with power and energy monitoring"
+      },
+      "add_device": {
+        "title": "Add Device",
+        "description": "Configure a device with power and/or energy sensors",
         "data": {
-          "power_entities": "Power entities",
-          "energy_entities": "Energy entities"
+          "device_name": "Device name",
+          "power_entity": "Power sensor (Watts)",
+          "energy_entity": "Energy sensor (kWh)"
+        }
+      },
+      "add_another": {
+        "title": "Add Another Device?",
+        "description": "Current devices:\n{devices}\n\nWould you like to add another device?",
+        "data": {
+          "add_another": "Add another device"
         }
       },
       "upstream": {
@@ -19,7 +31,8 @@
       }
     },
     "error": {
-      "no_entities_selected": "Please select at least one power or energy entity"
+      "no_sensors_selected": "Please select at least one power or energy sensor",
+      "device_name_required": "Device name is required"
     },
     "abort": {
       "already_configured": "This configuration is already set up"
@@ -29,13 +42,7 @@
     "step": {
       "init": {
         "title": "Configure Phantom Power Monitoring",
-        "description": "Update your power and energy monitoring configuration",
-        "data": {
-          "power_entities": "Power entities",
-          "energy_entities": "Energy entities",
-          "upstream_power_entity": "Upstream power entity",
-          "upstream_energy_entity": "Upstream energy entity"
-        }
+        "description": "Configuration changes require removing and re-adding the integration"
       }
     }
   }

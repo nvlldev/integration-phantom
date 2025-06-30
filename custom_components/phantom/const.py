@@ -2,10 +2,13 @@
 
 DOMAIN = "phantom"
 
-CONF_POWER_ENTITIES = "power_entities"
-CONF_ENERGY_ENTITIES = "energy_entities"
+CONF_DEVICES = "devices"
 CONF_UPSTREAM_POWER_ENTITY = "upstream_power_entity"
 CONF_UPSTREAM_ENERGY_ENTITY = "upstream_energy_entity"
+
+# Legacy constants for backward compatibility
+CONF_POWER_ENTITIES = "power_entities"
+CONF_ENERGY_ENTITIES = "energy_entities"
 
 ATTR_ENTITIES = "entities"
 ATTR_UPSTREAM_POWER_ENTITY = "upstream_power_entity"
