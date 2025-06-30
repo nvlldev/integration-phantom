@@ -67,6 +67,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         hass.data[DOMAIN].pop(entry.entry_id)
+        
+        # Remove panel if it exists
+        frontend_panels = hass.data.get("frontend_panels", {})
+        if "phantom" in frontend_panels:
+            frontend_panels.pop("phantom")
+            _LOGGER.info("Removed Phantom panel")
 
     return unload_ok
 

@@ -21,20 +21,32 @@ async def async_register_panel(hass: HomeAssistant) -> None:
     )
     _LOGGER.info("Registered static path for panel files: %s -> /phantom-static", panel_dir)
     
-    # Register the panel using the proper method
-    await async_register_built_in_panel(
-        hass,
-        component_name="custom",
-        sidebar_title="Phantom",
-        sidebar_icon="mdi:flash",
-        frontend_url_path="phantom",
-        config={
-            "name": "ha-panel-phantom",
-            "embed_iframe": False,
-            "trust_external": False,
-            "js_url": "/phantom-static/ha-panel-phantom.js",
-        },
-        require_admin=True,
-    )
+    # Check if panel already exists
+    frontend = hass.data.get("frontend_panels", {})
+    if "phantom" in frontend:
+        _LOGGER.info("Phantom panel already registered, skipping registration")
+        return
     
-    _LOGGER.info("✅ Phantom panel registered successfully")
+    try:
+        # Register the panel using the proper method
+        await async_register_built_in_panel(
+            hass,
+            component_name="custom",
+            sidebar_title="Phantom",
+            sidebar_icon="mdi:flash",
+            frontend_url_path="phantom",
+            config={
+                "name": "ha-panel-phantom",
+                "embed_iframe": False,
+                "trust_external": False,
+                "js_url": "/phantom-static/ha-panel-phantom.js",
+            },
+            require_admin=True,
+        )
+        
+        _LOGGER.info("✅ Phantom panel registered successfully")
+    except ValueError as e:
+        if "Overwriting panel" in str(e):
+            _LOGGER.warning("Panel already exists, this is expected on reload")
+        else:
+            raise
