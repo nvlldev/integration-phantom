@@ -253,7 +253,7 @@ class PhantomPowerSensor(PhantomBaseSensor):
     @property
     def name(self) -> str:
         """Return the name of the sensor."""
-        return "Power"
+        return "Power Total"
 
     @property
     def device_class(self) -> SensorDeviceClass:
@@ -307,7 +307,7 @@ class PhantomEnergySensor(PhantomBaseSensor):
     @property
     def name(self) -> str:
         """Return the name of the sensor."""
-        return "Energy"
+        return "Energy Total"
 
     @property
     def device_class(self) -> SensorDeviceClass:
@@ -541,9 +541,53 @@ class PhantomIndividualPowerSensor(SensorEntity, RestoreEntity):
     @property
     def name(self) -> str:
         """Return the name of the sensor."""
-        # Extract a clean name from the entity ID
-        parts = self._source_entity_id.split('.')[-1].replace('_', ' ')
-        return f"{parts.title()} power"
+        # Get the friendly name from the source entity if available
+        source_state = self.hass.states.get(self._source_entity_id)
+        if source_state and source_state.attributes.get("friendly_name"):
+            device_name = source_state.attributes["friendly_name"]
+        else:
+            # Fall back to processing entity ID
+            parts = self._source_entity_id.split('.')[-1].replace('_', ' ')
+            device_name = self._convert_to_camel_case(parts)
+        
+        return f"{device_name} Power"
+    
+    def _convert_to_camel_case(self, text: str) -> str:
+        """Convert text to proper camel case, preserving known device names."""
+        # Common device/brand names that should maintain specific capitalization
+        special_cases = {
+            'idrac': 'iDRAC',
+            'ups': 'UPS', 
+            'tv': 'TV',
+            'pc': 'PC',
+            'hvac': 'HVAC',
+            'led': 'LED',
+            'cpu': 'CPU',
+            'gpu': 'GPU',
+            'ssd': 'SSD',
+            'hdd': 'HDD',
+            'wifi': 'WiFi',
+            'iot': 'IoT',
+            'api': 'API',
+            'dns': 'DNS',
+            'dhcp': 'DHCP',
+            'poe': 'PoE',
+            'pdu': 'PDU',
+            'nas': 'NAS',
+            'raid': 'RAID'
+        }
+        
+        words = text.split()
+        result = []
+        
+        for word in words:
+            word_lower = word.lower()
+            if word_lower in special_cases:
+                result.append(special_cases[word_lower])
+            else:
+                result.append(word.capitalize())
+        
+        return ' '.join(result)
 
     @property
     def should_poll(self) -> bool:
@@ -706,7 +750,7 @@ class PhantomUpstreamPowerSensor(SensorEntity, RestoreEntity):
     @property
     def name(self) -> str:
         """Return the name of the sensor."""
-        return "Upstream power"
+        return "Upstream Power"
 
     @property
     def should_poll(self) -> bool:
@@ -839,7 +883,7 @@ class PhantomUpstreamEnergyMeterSensor(SensorEntity, RestoreEntity):
     @property
     def name(self) -> str:
         """Return the name of the sensor."""
-        return "Upstream energy meter"
+        return "Upstream Energy Meter"
 
     @property
     def should_poll(self) -> bool:
@@ -993,7 +1037,7 @@ class PhantomPowerRemainderSensor(PhantomRemainderBaseSensor):
     @property
     def name(self) -> str:
         """Return the name of the sensor."""
-        return "Power remainder"
+        return "Power Remainder"
 
     @property
     def device_class(self) -> SensorDeviceClass:
@@ -1022,7 +1066,7 @@ class PhantomEnergyRemainderSensor(PhantomRemainderBaseSensor):
     @property
     def name(self) -> str:
         """Return the name of the sensor."""
-        return "Energy remainder"
+        return "Energy Remainder"
 
     @property
     def device_class(self) -> SensorDeviceClass:
@@ -1246,9 +1290,53 @@ class PhantomUtilityMeterSensor(SensorEntity, RestoreEntity):
     @property
     def name(self) -> str:
         """Return the name of the sensor."""
-        # Extract a clean name from the entity ID
-        parts = self._source_entity_id.split('.')[-1].replace('_', ' ')
-        return f"{parts.title()} meter"
+        # Get the friendly name from the source entity if available
+        source_state = self.hass.states.get(self._source_entity_id)
+        if source_state and source_state.attributes.get("friendly_name"):
+            device_name = source_state.attributes["friendly_name"]
+        else:
+            # Fall back to processing entity ID
+            parts = self._source_entity_id.split('.')[-1].replace('_', ' ')
+            device_name = self._convert_to_camel_case(parts)
+        
+        return f"{device_name} Energy Meter"
+    
+    def _convert_to_camel_case(self, text: str) -> str:
+        """Convert text to proper camel case, preserving known device names."""
+        # Common device/brand names that should maintain specific capitalization
+        special_cases = {
+            'idrac': 'iDRAC',
+            'ups': 'UPS', 
+            'tv': 'TV',
+            'pc': 'PC',
+            'hvac': 'HVAC',
+            'led': 'LED',
+            'cpu': 'CPU',
+            'gpu': 'GPU',
+            'ssd': 'SSD',
+            'hdd': 'HDD',
+            'wifi': 'WiFi',
+            'iot': 'IoT',
+            'api': 'API',
+            'dns': 'DNS',
+            'dhcp': 'DHCP',
+            'poe': 'PoE',
+            'pdu': 'PDU',
+            'nas': 'NAS',
+            'raid': 'RAID'
+        }
+        
+        words = text.split()
+        result = []
+        
+        for word in words:
+            word_lower = word.lower()
+            if word_lower in special_cases:
+                result.append(special_cases[word_lower])
+            else:
+                result.append(word.capitalize())
+        
+        return ' '.join(result)
 
     @property
     def should_poll(self) -> bool:
