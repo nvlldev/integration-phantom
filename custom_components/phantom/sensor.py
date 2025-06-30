@@ -394,7 +394,13 @@ class PhantomEnergySensor(PhantomBaseSensor, RestoreEntity):
     
     async def _delayed_setup(self) -> None:
         """Set up tracking after a delay."""
-        await asyncio.sleep(2)
+        # Check if migration is active
+        migration_data = self.hass.data.get("phantom_state_migration", {}).get(self._config_entry_id)
+        if migration_data:
+            _LOGGER.debug("Migration detected for energy total, waiting longer for utility meters to settle")
+            await asyncio.sleep(3)  # Wait longer during migration
+        else:
+            await asyncio.sleep(2)
         
         # Find utility meter entities for this group
         self._utility_meter_entities = await self._find_utility_meter_entities()
@@ -604,6 +610,8 @@ class PhantomUtilityMeterSensor(PhantomBaseSensor, RestoreEntity):
                     self._total_consumed,
                     migrated_state.get("old_entity_id", "unknown")
                 )
+                # Force immediate state write after migration
+                self.async_write_ha_state()
             except (ValueError, TypeError) as e:
                 _LOGGER.warning("Failed to restore migrated state: %s", e)
                 self._total_consumed = 0.0
@@ -808,6 +816,8 @@ class PhantomUpstreamEnergyMeterSensor(PhantomBaseSensor, RestoreEntity):
                     self._total_consumed,
                     migrated_state.get("old_entity_id", "unknown")
                 )
+                # Force immediate state write after migration
+                self.async_write_ha_state()
             except (ValueError, TypeError) as e:
                 _LOGGER.warning("Failed to restore migrated state: %s", e)
                 self._total_consumed = 0.0
@@ -1019,7 +1029,13 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor):
     
     async def _delayed_setup(self) -> None:
         """Set up tracking after a delay."""
-        await asyncio.sleep(2)
+        # Check if migration is active
+        migration_data = self.hass.data.get("phantom_state_migration", {}).get(self._config_entry_id)
+        if migration_data:
+            _LOGGER.debug("Migration detected for energy remainder, waiting longer for meters to settle")
+            await asyncio.sleep(3)  # Wait longer during migration
+        else:
+            await asyncio.sleep(2)
         
         # Find upstream meter entity
         self._upstream_meter_entity = await self._find_upstream_meter_entity()
