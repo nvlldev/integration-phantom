@@ -12,6 +12,7 @@ from homeassistant.helpers.typing import ConfigType
 
 from .api import async_setup_api
 from .const import DOMAIN
+from .panel import async_register_panel
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,7 +52,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async_setup_api(hass)
     
     # Register custom panel
-    from .panel import async_register_panel
     await async_register_panel(hass)
 
     # Set up platforms
