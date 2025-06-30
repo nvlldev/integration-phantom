@@ -324,35 +324,101 @@ class PhantomEnergySensor(PhantomBaseSensor):
         """Return the unit of measurement."""
         return UnitOfEnergy.KILO_WATT_HOUR
 
+    def _find_utility_meter_entities(self) -> list[str]:
+        """Find utility meter entity IDs by searching the entity registry."""
+        from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
+        
+        entity_registry = async_get_entity_registry(self.hass)
+        utility_meter_entities = []
+        
+        # Look for entities with our unique IDs
+        for entity_id in self._entities:
+            clean_id = entity_id.replace(".", "_")
+            expected_unique_id = f"{self._config_entry.entry_id}_meter_{clean_id}"
+            
+            # Find entity with this unique ID
+            for ent_id, entry in entity_registry.entities.items():
+                if entry.unique_id == expected_unique_id:
+                    utility_meter_entities.append(ent_id)
+                    _LOGGER.debug("Found utility meter entity for energy total: %s (unique_id: %s)", ent_id, expected_unique_id)
+                    break
+        
+        return utility_meter_entities
+
+    async def async_added_to_hass(self) -> None:
+        """Run when entity about to be added to hass."""
+        # Don't call super() to avoid the base class implementation
+        await SensorEntity.async_added_to_hass(self)
+        await RestoreEntity.async_added_to_hass(self)
+        
+        # Restore last state
+        if last_state := await self.async_get_last_state():
+            if last_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                try:
+                    self._state = float(last_state.state)
+                except (ValueError, TypeError):
+                    self._state = None
+
+        # Track utility meter entities instead of raw entities
+        utility_meter_entities = self._find_utility_meter_entities()
+        
+        _LOGGER.debug("Energy total tracking utility meter entities: %s", utility_meter_entities)
+        
+        if utility_meter_entities:
+            self._unsubscribe_listeners.append(
+                async_track_state_change_event(
+                    self.hass,
+                    utility_meter_entities,
+                    self._async_state_changed,
+                )
+            )
+        
+        # Initial state update
+        await self._async_update_state()
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Run when entity will be removed from hass."""
+        for unsubscribe in self._unsubscribe_listeners:
+            unsubscribe()
+        self._unsubscribe_listeners.clear()
+
+    @callback
+    def _async_state_changed(self, event) -> None:
+        """Handle state changes."""
+        self.hass.async_create_task(self._async_update_state())
+
     async def _async_update_state(self) -> None:
-        """Update the energy sensor state."""
+        """Update the energy sensor state by summing utility meters."""
+        # Find utility meter entities
+        utility_meter_entities = self._find_utility_meter_entities()
+        
         total = 0.0
         available_count = 0
         
-        _LOGGER.debug("Energy group sensor update - checking %d entities", len(self._entities))
+        _LOGGER.debug("Energy total sensor update - checking %d utility meters", len(utility_meter_entities))
         
-        for entity_id in self._entities:
-            state = self.hass.states.get(entity_id)
-            _LOGGER.debug("Energy entity %s: %s", entity_id, state.state if state else "Not found")
+        for meter_id in utility_meter_entities:
+            state = self.hass.states.get(meter_id)
+            _LOGGER.debug("Utility meter %s: %s", meter_id, state.state if state else "Not found")
             
             if state and state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
                 try:
                     value = float(state.state)
                     total += value
                     available_count += 1
-                    _LOGGER.debug("Added %f from %s to energy total", value, entity_id)
+                    _LOGGER.debug("Added %f from meter %s to energy total", value, meter_id)
                 except (ValueError, TypeError):
-                    _LOGGER.warning("Invalid energy value for %s: %s", entity_id, state.state)
+                    _LOGGER.warning("Invalid utility meter value for %s: %s", meter_id, state.state)
                     continue
         
         if available_count > 0:
             self._available = True
             self._state = round(total, 3)
-            _LOGGER.debug("Energy group total calculated: %f", self._state)
+            _LOGGER.debug("Energy total calculated from utility meters: %f", self._state)
         else:
             self._available = False
             self._state = None
-            _LOGGER.debug("Energy group unavailable - no valid entities")
+            _LOGGER.debug("Energy total unavailable - no valid utility meters")
         
         self.async_write_ha_state()
 
