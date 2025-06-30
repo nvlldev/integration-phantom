@@ -32,10 +32,10 @@ async def async_register_panel(hass: HomeAssistant) -> None:
             frontend_url_path="phantom",
             config={
                 "_panel_custom": {
-                    "name": "ha-panel-phantom",
+                    "name": "phantom-config-panel",
                     "embed_iframe": False,
                     "trust_external": False,
-                    "module_url": "/phantom-static/phantom-config-panel.js",
+                    "module_url": "/phantom-static/phantom-config-panel.js?v=2",
                 }
             },
             require_admin=True,

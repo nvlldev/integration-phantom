@@ -1,7 +1,7 @@
 // Phantom Power Monitoring Panel
-console.log("[Phantom] Loading panel v1.0.2...");
+console.log("[Phantom] Loading panel v2.0...");
 
-class HaPanelPhantom extends HTMLElement {
+class PhantomConfigPanel extends HTMLElement {
   constructor() {
     super();
     this._hass = null;
@@ -337,7 +337,12 @@ class HaPanelPhantom extends HTMLElement {
   }
 }
 
-// Register the custom element
-customElements.define("ha-panel-phantom", HaPanelPhantom);
+// Register the custom element with a new name to avoid conflicts
+if (!customElements.get("phantom-config-panel")) {
+  customElements.define("phantom-config-panel", PhantomConfigPanel);
+  console.log("[Phantom] Panel registered as phantom-config-panel");
+} else {
+  console.log("[Phantom] Panel already registered, skipping");
+}
 
 console.log("[Phantom] Panel script loaded");
