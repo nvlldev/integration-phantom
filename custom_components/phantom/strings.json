@@ -1,7 +1,8 @@
 {
   "config": {
     "abort": {
-      "already_configured": "Phantom Power Monitoring is already configured"
+      "already_configured": "Phantom Power Monitoring is already configured",
+      "single_instance_allowed": "Only one instance of Phantom Power Monitoring is allowed"
     }
   },
   "options": {

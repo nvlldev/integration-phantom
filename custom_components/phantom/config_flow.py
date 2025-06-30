@@ -27,6 +27,10 @@ class PhantomConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Check if already configured
         await self.async_set_unique_id(DOMAIN)
         self._abort_if_unique_id_configured()
+        
+        # Check if any instance already exists
+        if self._async_current_entries():
+            return self.async_abort(reason="single_instance_allowed")
 
         # Create the entry immediately
         return self.async_create_entry(

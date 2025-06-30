@@ -42,11 +42,49 @@ class HaPanelPhantom extends HTMLElement {
     console.log("[Phantom] Initializing panel...");
     this.innerHTML = '<div style="padding: 20px;">Loading Phantom configuration...</div>';
     
+    // Set up event delegation
+    this.addEventListener('click', this.handleClick.bind(this));
+    this.addEventListener('change', this.handleChange.bind(this));
+    
     try {
       await this.loadConfiguration();
     } catch (error) {
       console.error("[Phantom] Error during initialization:", error);
       this.showError(`Initialization error: ${error.message}`);
+    }
+  }
+
+  handleClick(event) {
+    const target = event.target;
+    
+    if (target.classList.contains('delete-btn')) {
+      const index = parseInt(target.dataset.index);
+      this.removeDevice(index);
+    } else if (target.classList.contains('add-device')) {
+      this.addDevice();
+    } else if (target.classList.contains('btn-primary')) {
+      this.saveConfiguration();
+    } else if (target.classList.contains('btn-secondary')) {
+      this.loadConfiguration();
+    }
+  }
+
+  handleChange(event) {
+    const target = event.target;
+    
+    if (target.classList.contains('device-name')) {
+      const index = parseInt(target.dataset.index);
+      this.updateDevice(index, 'name', target.value);
+    } else if (target.classList.contains('device-power')) {
+      const index = parseInt(target.dataset.index);
+      this.updateDevice(index, 'power_entity', target.value);
+    } else if (target.classList.contains('device-energy')) {
+      const index = parseInt(target.dataset.index);
+      this.updateDevice(index, 'energy_entity', target.value);
+    } else if (target.classList.contains('upstream-power')) {
+      this.updateUpstream('power', target.value);
+    } else if (target.classList.contains('upstream-energy')) {
+      this.updateUpstream('energy', target.value);
     }
   }
 
@@ -193,6 +231,9 @@ class HaPanelPhantom extends HTMLElement {
 
       <div class="phantom-panel">
         <h1>⚡ Phantom Power Monitoring</h1>
+        <p style="color: var(--secondary-text-color); margin-bottom: 24px;">
+          Configure devices to monitor and group power/energy consumption. Each configuration creates a separate monitoring group.
+        </p>
 
         <div class="section">
           <h2>Devices (${this.devices.length})</h2>
@@ -205,19 +246,18 @@ class HaPanelPhantom extends HTMLElement {
             <div class="device-card">
               <div class="device-header">
                 <strong>Device ${index + 1}: ${device.name || 'Unnamed'}</strong>
-                <button class="delete-btn" onclick="this.getRootNode().host.removeDevice(${index})">Delete</button>
+                <button class="delete-btn" data-index="${index}">Delete</button>
               </div>
               
               <div class="device-row">
                 <label>Name:</label>
-                <input value="${device.name || ''}" 
-                       onchange="this.getRootNode().host.updateDevice(${index}, 'name', this.value)"
+                <input class="device-name" data-index="${index}" value="${device.name || ''}" 
                        placeholder="Enter device name">
               </div>
               
               <div class="device-row">
                 <label>Power Sensor:</label>
-                <select onchange="this.getRootNode().host.updateDevice(${index}, 'power_entity', this.value)">
+                <select class="device-power" data-index="${index}">
                   <option value="">Select power sensor (optional)</option>
                   ${powerEntities.map(entity => 
                     `<option value="${entity.entity_id}" ${device.power_entity === entity.entity_id ? 'selected' : ''}>
@@ -229,7 +269,7 @@ class HaPanelPhantom extends HTMLElement {
               
               <div class="device-row">
                 <label>Energy Sensor:</label>
-                <select onchange="this.getRootNode().host.updateDevice(${index}, 'energy_entity', this.value)">
+                <select class="device-energy" data-index="${index}">
                   <option value="">Select energy sensor (optional)</option>
                   ${energyEntities.map(entity => 
                     `<option value="${entity.entity_id}" ${device.energy_entity === entity.entity_id ? 'selected' : ''}>
@@ -241,7 +281,7 @@ class HaPanelPhantom extends HTMLElement {
             </div>
           `).join('')}
           
-          <div class="add-device" onclick="this.getRootNode().host.addDevice()">
+          <div class="add-device">
             <div style="font-size: 24px; color: var(--primary-color);">+</div>
             <div>Add Device</div>
           </div>
@@ -255,7 +295,7 @@ class HaPanelPhantom extends HTMLElement {
           
           <div class="device-row">
             <label>Upstream Power:</label>
-            <select onchange="this.getRootNode().host.updateUpstream('power', this.value)">
+            <select class="upstream-power">
               <option value="">Select upstream power entity (optional)</option>
               ${powerEntities
                 .filter(entity => !usedPowerEntities.has(entity.entity_id))
@@ -269,7 +309,7 @@ class HaPanelPhantom extends HTMLElement {
           
           <div class="device-row">
             <label>Upstream Energy:</label>
-            <select onchange="this.getRootNode().host.updateUpstream('energy', this.value)">
+            <select class="upstream-energy">
               <option value="">Select upstream energy entity (optional)</option>
               ${energyEntities
                 .filter(entity => !usedEnergyEntities.has(entity.entity_id))
@@ -283,8 +323,8 @@ class HaPanelPhantom extends HTMLElement {
         </div>
 
         <div class="actions">
-          <button class="btn btn-secondary" onclick="this.getRootNode().host.loadConfiguration()">Reset</button>
-          <button class="btn btn-primary" onclick="this.getRootNode().host.saveConfiguration()">Save Configuration</button>
+          <button class="btn btn-secondary">Reset</button>
+          <button class="btn btn-primary">Save Configuration</button>
         </div>
       </div>
     `;
