@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from homeassistant.components.frontend import async_register_built_in_panel
+from homeassistant.components import frontend
 from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
@@ -22,14 +22,14 @@ async def async_register_panel(hass: HomeAssistant) -> None:
     _LOGGER.info("Registered static path for panel files: %s -> /phantom-static", panel_dir)
     
     # Check if panel already exists
-    frontend = hass.data.get("frontend_panels", {})
-    if "phantom" in frontend:
+    frontend_panels = getattr(hass.components.frontend, "panels", {})
+    if "phantom" in frontend_panels:
         _LOGGER.info("Phantom panel already registered, skipping registration")
         return
     
     try:
         # Register the panel using the proper method
-        await async_register_built_in_panel(
+        frontend.async_register_built_in_panel(
             hass,
             component_name="custom",
             sidebar_title="Phantom",

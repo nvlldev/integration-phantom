@@ -69,10 +69,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN].pop(entry.entry_id)
         
         # Remove panel if it exists
-        frontend_panels = hass.data.get("frontend_panels", {})
-        if "phantom" in frontend_panels:
-            frontend_panels.pop("phantom")
-            _LOGGER.info("Removed Phantom panel")
+        try:
+            frontend_panels = getattr(hass.components.frontend, "panels", {})
+            if "phantom" in frontend_panels:
+                frontend_panels.pop("phantom", None)
+                _LOGGER.info("Removed Phantom panel")
+        except Exception as e:
+            _LOGGER.warning("Could not remove panel: %s", e)
 
     return unload_ok
 
