@@ -50,6 +50,18 @@ async def async_setup_entry(
     
     # Power sensors
     if power_entities:
+        # Individual power meters for each power entity
+        for entity_id in power_entities:
+            entities.append(
+                PhantomIndividualPowerSensor(
+                    hass,
+                    config_entry,
+                    entity_id,
+                    power_entities,
+                    upstream_power_entity,
+                )
+            )
+        
         # Power group total
         entities.append(
             PhantomPowerSensor(
@@ -99,6 +111,8 @@ async def async_setup_entry(
                     hass,
                     config_entry,
                     entity_id,
+                    energy_entities,
+                    upstream_energy_entity,
                 )
             )
     
@@ -446,6 +460,176 @@ class PhantomRemainderBaseSensor(SensorEntity, RestoreEntity):
         self.async_write_ha_state()
 
 
+class PhantomIndividualPowerSensor(SensorEntity, RestoreEntity):
+    """Individual power sensor with percentage calculations."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        config_entry: ConfigEntry,
+        source_entity_id: str,
+        group_entities: list[str],
+        upstream_entity_id: str | None,
+    ) -> None:
+        """Initialize the individual power sensor."""
+        self.hass = hass
+        self._config_entry = config_entry
+        self._source_entity_id = source_entity_id
+        self._group_entities = group_entities
+        self._upstream_entity_id = upstream_entity_id
+        self._state = None
+        self._available = True
+        self._unsubscribe_listeners = []
+
+    @property
+    def has_entity_name(self) -> bool:
+        """Return True if entity has a name."""
+        return True
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._config_entry.entry_id)},
+            name=self._config_entry.title,
+            manufacturer="Phantom",
+            model="Power Monitor",
+            sw_version="1.0.0",
+        )
+
+    @property
+    def unique_id(self) -> str:
+        """Return a unique ID."""
+        clean_id = self._source_entity_id.replace(".", "_")
+        return f"{self._config_entry.entry_id}_power_{clean_id}"
+
+    @property
+    def name(self) -> str:
+        """Return the name of the sensor."""
+        # Extract a clean name from the entity ID
+        parts = self._source_entity_id.split('.')[-1].replace('_', ' ')
+        return f"{parts.title()} power"
+
+    @property
+    def should_poll(self) -> bool:
+        """Return False as we handle updates via state change events."""
+        return False
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        return self._available
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the state of the sensor."""
+        return self._state
+
+    @property
+    def device_class(self) -> SensorDeviceClass:
+        """Return the device class."""
+        return SensorDeviceClass.POWER
+
+    @property
+    def state_class(self) -> SensorStateClass:
+        """Return the state class."""
+        return SensorStateClass.MEASUREMENT
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        """Return the unit of measurement."""
+        return UnitOfPower.WATT
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the state attributes."""
+        attributes = {"source_entity": self._source_entity_id}
+        
+        # Calculate percentages
+        if self._state is not None and self._state > 0:
+            # Get group total
+            group_total = 0.0
+            for entity_id in self._group_entities:
+                state = self.hass.states.get(entity_id)
+                if state and state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                    try:
+                        group_total += float(state.state)
+                    except (ValueError, TypeError):
+                        pass
+            
+            if group_total > 0:
+                attributes["percent_of_group"] = round((self._state / group_total) * 100, 1)
+            
+            # Get upstream value if configured
+            if self._upstream_entity_id:
+                upstream_state = self.hass.states.get(self._upstream_entity_id)
+                if upstream_state and upstream_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                    try:
+                        upstream_value = float(upstream_state.state)
+                        if upstream_value > 0:
+                            attributes["percent_of_upstream"] = round((self._state / upstream_value) * 100, 1)
+                    except (ValueError, TypeError):
+                        pass
+        
+        return attributes
+
+    async def async_added_to_hass(self) -> None:
+        """Run when entity about to be added to hass."""
+        await super().async_added_to_hass()
+        
+        # Restore state
+        if last_state := await self.async_get_last_state():
+            if last_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                try:
+                    self._state = float(last_state.state)
+                except (ValueError, TypeError):
+                    self._state = None
+
+        # Track source entity changes
+        track_entities = [self._source_entity_id] + self._group_entities
+        if self._upstream_entity_id:
+            track_entities.append(self._upstream_entity_id)
+            
+        self._unsubscribe_listeners.append(
+            async_track_state_change_event(
+                self.hass,
+                track_entities,
+                self._async_state_changed,
+            )
+        )
+        
+        await self._async_update_state()
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Run when entity will be removed from hass."""
+        for unsubscribe in self._unsubscribe_listeners:
+            unsubscribe()
+        self._unsubscribe_listeners.clear()
+
+    @callback
+    def _async_state_changed(self, event) -> None:
+        """Handle state changes."""
+        self.hass.async_create_task(self._async_update_state())
+
+    async def _async_update_state(self) -> None:
+        """Update the individual power sensor state."""
+        source_state = self.hass.states.get(self._source_entity_id)
+        
+        if not source_state or source_state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+            self._available = False
+            self._state = None
+        else:
+            try:
+                self._state = float(source_state.state)
+                self._available = True
+            except (ValueError, TypeError):
+                _LOGGER.warning("Invalid power value for %s: %s", self._source_entity_id, source_state.state)
+                self._available = False
+                self._state = None
+        
+        self.async_write_ha_state()
+
+
 class PhantomPowerRemainderSensor(PhantomRemainderBaseSensor):
     """Phantom power remainder sensor."""
 
@@ -512,11 +696,15 @@ class PhantomUtilityMeterSensor(SensorEntity, RestoreEntity):
         hass: HomeAssistant,
         config_entry: ConfigEntry,
         source_entity_id: str,
+        group_entities: list[str],
+        upstream_entity_id: str | None,
     ) -> None:
         """Initialize the utility meter sensor."""
         self.hass = hass
         self._config_entry = config_entry
         self._source_entity_id = source_entity_id
+        self._group_entities = group_entities
+        self._upstream_entity_id = upstream_entity_id
         self._state = 0.0
         self._available = True
         self._baseline_value = None
@@ -549,11 +737,9 @@ class PhantomUtilityMeterSensor(SensorEntity, RestoreEntity):
     @property
     def name(self) -> str:
         """Return the name of the sensor."""
-        source_state = self.hass.states.get(self._source_entity_id)
-        if source_state:
-            source_name = source_state.attributes.get("friendly_name", self._source_entity_id)
-            return f"{source_name} meter"
-        return f"{self._source_entity_id} meter"
+        # Extract a clean name from the entity ID
+        parts = self._source_entity_id.split('.')[-1].replace('_', ' ')
+        return f"{parts.title()} meter"
 
     @property
     def should_poll(self) -> bool:
@@ -591,6 +777,40 @@ class PhantomUtilityMeterSensor(SensorEntity, RestoreEntity):
         attributes = {"source_entity": self._source_entity_id}
         if self._baseline_value is not None:
             attributes["baseline"] = self._baseline_value
+        
+        # Calculate percentages based on source entity value
+        if self._state is not None and self._state > 0:
+            source_state = self.hass.states.get(self._source_entity_id)
+            if source_state and source_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                try:
+                    source_value = float(source_state.state)
+                    
+                    # Get group total from source entities
+                    group_total = 0.0
+                    for entity_id in self._group_entities:
+                        state = self.hass.states.get(entity_id)
+                        if state and state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                            try:
+                                group_total += float(state.state)
+                            except (ValueError, TypeError):
+                                pass
+                    
+                    if group_total > 0:
+                        attributes["percent_of_group"] = round((source_value / group_total) * 100, 1)
+                    
+                    # Get upstream value if configured
+                    if self._upstream_entity_id:
+                        upstream_state = self.hass.states.get(self._upstream_entity_id)
+                        if upstream_state and upstream_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                            try:
+                                upstream_value = float(upstream_state.state)
+                                if upstream_value > 0:
+                                    attributes["percent_of_upstream"] = round((source_value / upstream_value) * 100, 1)
+                            except (ValueError, TypeError):
+                                pass
+                except (ValueError, TypeError):
+                    pass
+        
         return attributes
 
     async def async_added_to_hass(self) -> None:
