@@ -510,8 +510,8 @@ class PhantomIndividualPowerSensor(PhantomBaseSensor):
         power_entity: str,
     ) -> None:
         """Initialize the sensor."""
-        # Initialize parent but we'll override the unique_id
-        super().__init__(config_entry_id, group_name, f"power_{sanitize_name(device_name)}")
+        # Initialize parent with None for group_id since we'll override unique_id anyway
+        super().__init__(config_entry_id, group_name, None, f"power_{sanitize_name(device_name)}")
         # Use simple device UUID as unique_id for device-specific sensors
         self._attr_unique_id = f"{device_id}_power"
         self._device_name = device_name
@@ -589,8 +589,8 @@ class PhantomUtilityMeterSensor(PhantomBaseSensor, RestoreEntity):
         energy_entity: str,
     ) -> None:
         """Initialize the sensor."""
-        # Initialize parent but we'll override the unique_id
-        super().__init__(config_entry_id, group_name, f"utility_meter_{sanitize_name(device_name)}")
+        # Initialize parent with None for group_id since we'll override unique_id anyway
+        super().__init__(config_entry_id, group_name, None, f"utility_meter_{sanitize_name(device_name)}")
         # Use simple device UUID as unique_id for device-specific sensors
         self._attr_unique_id = f"{device_id}_utility_meter"
         self._hass = hass
