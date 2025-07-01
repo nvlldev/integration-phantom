@@ -920,13 +920,27 @@ class PhantomUpstreamEnergyMeterSensor(PhantomBaseSensor, RestoreEntity):
         
         # Get initial state
         state = self.hass.states.get(self._upstream_entity)
+        _LOGGER.info(
+            "Initializing upstream energy meter for %s - entity: %s, state: %s",
+            self._group_name,
+            self._upstream_entity,
+            state.state if state else "None"
+        )
         if state and state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
             try:
                 self._last_value = float(state.state)
+                unit = state.attributes.get("unit_of_measurement")
+                _LOGGER.info(
+                    "Initial upstream value: %s %s",
+                    self._last_value,
+                    unit
+                )
                 # Convert Wh to kWh if needed
-                if state.attributes.get("unit_of_measurement") == UnitOfEnergy.WATT_HOUR:
+                if unit == UnitOfEnergy.WATT_HOUR:
                     self._last_value = self._last_value / 1000
-            except (ValueError, TypeError):
+                    _LOGGER.info("Converted initial value to kWh: %s", self._last_value)
+            except (ValueError, TypeError) as err:
+                _LOGGER.error("Failed to get initial upstream value: %s", err)
                 self._last_value = None
         
         # Also try to restore the last tracked value from attributes
@@ -952,6 +966,14 @@ class PhantomUpstreamEnergyMeterSensor(PhantomBaseSensor, RestoreEntity):
     def _handle_state_change(self, event) -> None:
         """Handle state changes of tracked entity."""
         new_state = event.data.get("new_state")
+        old_state = event.data.get("old_state")
+        
+        _LOGGER.debug(
+            "Upstream energy state change for %s: old=%s, new=%s",
+            self._upstream_entity,
+            old_state.state if old_state else "None",
+            new_state.state if new_state else "None"
+        )
         
         if new_state is None or new_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
             self._attr_available = False
@@ -961,19 +983,43 @@ class PhantomUpstreamEnergyMeterSensor(PhantomBaseSensor, RestoreEntity):
         try:
             # Get the new value
             new_value = float(new_state.state)
+            unit = new_state.attributes.get("unit_of_measurement")
+            
+            _LOGGER.debug(
+                "Upstream energy raw value: %s %s (last_value=%s, total_consumed=%s)",
+                new_value,
+                unit,
+                self._last_value,
+                self._total_consumed
+            )
             
             # Convert Wh to kWh if needed
-            if new_state.attributes.get("unit_of_measurement") == UnitOfEnergy.WATT_HOUR:
+            if unit == UnitOfEnergy.WATT_HOUR:
                 new_value = new_value / 1000
+                _LOGGER.debug("Converted Wh to kWh: %s", new_value)
             
             # Calculate consumption
             if self._last_value is not None and new_value >= self._last_value:
                 # Normal increase
                 consumption = new_value - self._last_value
                 self._total_consumed += consumption
+                _LOGGER.debug(
+                    "Normal consumption increase: %s kWh (total now: %s kWh)",
+                    consumption,
+                    self._total_consumed
+                )
             elif self._last_value is not None and new_value < self._last_value:
                 # Meter reset or rollover - just use the new value as consumption
                 self._total_consumed += new_value
+                _LOGGER.debug(
+                    "Meter reset detected, adding new value: %s kWh (total now: %s kWh)",
+                    new_value,
+                    self._total_consumed
+                )
+            else:
+                _LOGGER.debug(
+                    "No consumption added - last_value is None or same value"
+                )
             
             self._last_value = new_value
             self._attr_available = True
