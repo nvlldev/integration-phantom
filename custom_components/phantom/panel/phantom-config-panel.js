@@ -508,7 +508,7 @@ class PhantomConfigPanel extends HTMLElement {
                     <option value="">Select power sensor (optional)</option>
                     ${filteredPowerEntities.map(entity => 
                       `<option value="${entity.entity_id}" ${device.power_entity === entity.entity_id ? 'selected' : ''}>
-                        ${entity.attributes.friendly_name || entity.entity_id}
+                        ${entity.attributes.friendly_name ? `${entity.attributes.friendly_name} (${entity.entity_id})` : entity.entity_id}
                       </option>`
                     ).join('')}
                   </select>
@@ -520,7 +520,7 @@ class PhantomConfigPanel extends HTMLElement {
                     <option value="">Select energy sensor (optional)</option>
                     ${filteredEnergyEntities.map(entity => 
                       `<option value="${entity.entity_id}" ${device.energy_entity === entity.entity_id ? 'selected' : ''}>
-                        ${entity.attributes.friendly_name || entity.entity_id}
+                        ${entity.attributes.friendly_name ? `${entity.attributes.friendly_name} (${entity.entity_id})` : entity.entity_id}
                       </option>`
                     ).join('')}
                   </select>
@@ -548,7 +548,7 @@ class PhantomConfigPanel extends HTMLElement {
               ${this.filterEntitiesForUpstream(powerEntities, 'power')
                 .map(entity => 
                   `<option value="${entity.entity_id}" ${group.upstream_power_entity === entity.entity_id ? 'selected' : ''}>
-                    ${entity.attributes.friendly_name || entity.entity_id}
+                    ${entity.attributes.friendly_name ? `${entity.attributes.friendly_name} (${entity.entity_id})` : entity.entity_id}
                   </option>`
                 ).join('')}
             </select>
@@ -561,7 +561,7 @@ class PhantomConfigPanel extends HTMLElement {
               ${this.filterEntitiesForUpstream(energyEntities, 'energy')
                 .map(entity => 
                   `<option value="${entity.entity_id}" ${group.upstream_energy_entity === entity.entity_id ? 'selected' : ''}>
-                    ${entity.attributes.friendly_name || entity.entity_id}
+                    ${entity.attributes.friendly_name ? `${entity.attributes.friendly_name} (${entity.entity_id})` : entity.entity_id}
                   </option>`
                 ).join('')}
             </select>
