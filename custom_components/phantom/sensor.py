@@ -418,9 +418,15 @@ class PhantomEnergySensor(PhantomBaseSensor, RestoreEntity):
         utility_meters = []
         
         for device in self._devices:
-            device_name = device.get("name", "Unknown")
-            # Generate expected unique ID for utility meter
-            expected_unique_id = f"{self._config_entry_id}_{sanitize_name(self._group_name)}_utility_meter_{sanitize_name(device_name)}"
+            device_id = device.get(CONF_DEVICE_ID)
+            
+            if device_id:
+                # New UUID-based unique ID format
+                expected_unique_id = f"{device_id}_utility_meter"
+            else:
+                # Fallback to old format if no UUID (shouldn't happen)
+                device_name = device.get("name", "Unknown")
+                expected_unique_id = f"{self._config_entry_id}_{sanitize_name(self._group_name)}_utility_meter_{sanitize_name(device_name)}"
             
             # Find entity with this unique ID
             for entity_id, entry in entity_registry.entities.items():
@@ -484,11 +490,10 @@ class PhantomIndividualPowerSensor(PhantomBaseSensor):
         power_entity: str,
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(
-            config_entry_id, 
-            group_name, 
-            f"power_{device_id}"
-        )
+        # Initialize parent but we'll override the unique_id
+        super().__init__(config_entry_id, group_name, f"power_{sanitize_name(device_name)}")
+        # Use simple device UUID as unique_id for device-specific sensors
+        self._attr_unique_id = f"{device_id}_power"
         self._device_name = device_name
         self._device_id = device_id
         self._power_entity = power_entity
@@ -564,11 +569,10 @@ class PhantomUtilityMeterSensor(PhantomBaseSensor, RestoreEntity):
         energy_entity: str,
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(
-            config_entry_id,
-            group_name,
-            f"utility_meter_{device_id}"
-        )
+        # Initialize parent but we'll override the unique_id
+        super().__init__(config_entry_id, group_name, f"utility_meter_{sanitize_name(device_name)}")
+        # Use simple device UUID as unique_id for device-specific sensors
+        self._attr_unique_id = f"{device_id}_utility_meter"
         self._hass = hass
         self._device_name = device_name
         self._device_id = device_id
@@ -1112,9 +1116,15 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor):
         utility_meters = []
         
         for device in self._devices:
-            device_name = device.get("name", "Unknown")
-            # Generate expected unique ID for utility meter
-            expected_unique_id = f"{self._config_entry_id}_{sanitize_name(self._group_name)}_utility_meter_{sanitize_name(device_name)}"
+            device_id = device.get(CONF_DEVICE_ID)
+            
+            if device_id:
+                # New UUID-based unique ID format
+                expected_unique_id = f"{device_id}_utility_meter"
+            else:
+                # Fallback to old format if no UUID (shouldn't happen)
+                device_name = device.get("name", "Unknown")
+                expected_unique_id = f"{self._config_entry_id}_{sanitize_name(self._group_name)}_utility_meter_{sanitize_name(device_name)}"
             
             # Find entity with this unique ID
             for entity_id, entry in entity_registry.entities.items():

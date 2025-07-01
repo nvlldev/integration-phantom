@@ -7,7 +7,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
-from .const import DOMAIN
+from .const import DOMAIN, CONF_DEVICE_ID
 from .utils import sanitize_name
 
 _LOGGER = logging.getLogger(__name__)
@@ -43,9 +43,15 @@ def find_utility_meter_entities(
     utility_meters = []
     
     for device in devices:
-        device_name = device.get("name", "Unknown")
-        # Generate expected unique ID for utility meter
-        expected_unique_id = f"{config_entry_id}_{sanitize_name(group_name)}_utility_meter_{sanitize_name(device_name)}"
+        device_id = device.get(CONF_DEVICE_ID)
+        
+        if device_id:
+            # New UUID-based unique ID format
+            expected_unique_id = f"{device_id}_utility_meter"
+        else:
+            # Fallback to old format if no UUID (shouldn't happen)
+            device_name = device.get("name", "Unknown")
+            expected_unique_id = f"{config_entry_id}_{sanitize_name(group_name)}_utility_meter_{sanitize_name(device_name)}"
         
         # Find entity with this unique ID
         entity_id = find_entity_by_unique_id(hass, expected_unique_id)
