@@ -93,6 +93,16 @@ async def async_setup_entry(
     if entities:
         async_add_entities(entities)
         
+        # Store resetable entities for the button
+        resetable_entities = []
+        for entity in entities:
+            if hasattr(entity, "async_reset"):
+                resetable_entities.append(entity)
+        
+        if "entities" not in hass.data[DOMAIN][config_entry.entry_id]:
+            hass.data[DOMAIN][config_entry.entry_id]["entities"] = {}
+        hass.data[DOMAIN][config_entry.entry_id]["entities"]["resetable"] = resetable_entities
+        
         # Schedule clearing migration data after entities have been initialized
         async def clear_migration_after_delay():
             """Clear migration data after entities have had time to restore states."""
@@ -747,6 +757,26 @@ class PhantomUtilityMeterSensor(PhantomDeviceSensor, RestoreEntity):
             self._attr_available = False
         
         self.async_write_ha_state()
+    
+    async def async_reset(self) -> None:
+        """Reset the utility meter."""
+        _LOGGER.info("Resetting utility meter for device '%s'", self._device_name)
+        self._total_consumed = 0.0
+        self._attr_native_value = 0.0
+        self._last_value = None
+        
+        # Get current value of source entity to use as new baseline
+        state = self.hass.states.get(self._energy_entity)
+        if state and state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            try:
+                self._last_value = float(state.state)
+                # Convert Wh to kWh if needed
+                if state.attributes.get("unit_of_measurement") == "Wh":
+                    self._last_value = self._last_value / 1000
+            except (ValueError, TypeError):
+                _LOGGER.warning("Could not get current value for reset baseline")
+        
+        self.async_write_ha_state()
 
 
 class PhantomUpstreamPowerSensor(PhantomBaseSensor):
@@ -950,6 +980,26 @@ class PhantomUpstreamEnergyMeterSensor(PhantomBaseSensor, RestoreEntity):
         except (ValueError, TypeError) as err:
             _LOGGER.warning("Could not update upstream meter: %s", err)
             self._attr_available = False
+        
+        self.async_write_ha_state()
+    
+    async def async_reset(self) -> None:
+        """Reset the upstream energy meter."""
+        _LOGGER.info("Resetting upstream energy meter for group '%s'", self._group_name)
+        self._total_consumed = 0.0
+        self._attr_native_value = 0.0
+        self._last_value = None
+        
+        # Get current value of source entity to use as new baseline
+        state = self.hass.states.get(self._upstream_entity)
+        if state and state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            try:
+                self._last_value = float(state.state)
+                # Convert Wh to kWh if needed
+                if state.attributes.get("unit_of_measurement") == UnitOfEnergy.WATT_HOUR:
+                    self._last_value = self._last_value / 1000
+            except (ValueError, TypeError):
+                _LOGGER.warning("Could not get current value for reset baseline")
         
         self.async_write_ha_state()
 
