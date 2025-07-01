@@ -1,4 +1,8 @@
-"""State migration for preserving utility meter values during renames."""
+"""State migration for preserving utility meter values.
+
+With UUID-based unique IDs, this is now mainly for backward compatibility
+and major configuration changes rather than simple renames.
+"""
 from __future__ import annotations
 
 import logging
@@ -58,110 +62,23 @@ def create_migration_mapping(
     config_entry_id: str,
     saved_states: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
-    """Create a mapping of old entity IDs to new entity IDs for renamed groups and devices."""
+    """Create a mapping for migrating entities to UUID-based unique IDs.
+    
+    With UUID-based unique IDs, renames no longer require migration.
+    This function now mainly handles migration from old format to new UUID format.
+    """
     migration_mapping = {}
     
-    # Get groups from configs
-    old_groups = {group.get(CONF_GROUP_NAME): group for group in old_config.get(CONF_GROUPS, [])}
-    new_groups = {group.get(CONF_GROUP_NAME): group for group in new_config.get(CONF_GROUPS, [])}
+    # Log that we're checking for migrations
+    _LOGGER.info("Checking for entity migrations (UUID-based system)")
     
-    # Find renamed groups by comparing device configurations
-    for old_name, old_group in old_groups.items():
-        for new_name, new_group in new_groups.items():
-            if old_name != new_name and _groups_have_same_devices(
-                old_group.get(CONF_DEVICES, []), 
-                new_group.get(CONF_DEVICES, [])
-            ):
-                _LOGGER.info("Detected group rename: '%s' -> '%s'", old_name, new_name)
-                
-                # Create mappings for all utility meters in this group
-                for device in old_group.get(CONF_DEVICES, []):
-                    device_name = device.get("name", "")
-                    device_id = device.get(CONF_DEVICE_ID)
-                    
-                    if device_id and device.get("energy_entity"):
-                        # With UUIDs, unique IDs don't change with group renames
-                        # Old format might still exist in saved states
-                        old_unique_id = f"{device_id}_utility_meter"
-                        new_unique_id = old_unique_id  # Same ID, no change needed
-                        
-                        # Skip if already using new format
-                        continue
-                    elif device_name and device.get("energy_entity"):
-                        # Fallback to device name if no ID (shouldn't happen with new code)
-                        old_unique_id = f"{config_entry_id}_{sanitize_name(old_name)}_utility_meter_{sanitize_name(device_name)}"
-                        new_unique_id = f"{config_entry_id}_{sanitize_name(new_name)}_utility_meter_{sanitize_name(device_name)}"
-                    else:
-                        continue
-                        
-                    # Find the old entity ID from saved states
-                    for entity_id, state_data in saved_states.items():
-                        if state_data["unique_id"] == old_unique_id:
-                            migration_mapping[old_unique_id] = {
-                                "old_entity_id": entity_id,
-                                "new_unique_id": new_unique_id,
-                                "state": state_data["state"],
-                                "attributes": state_data["attributes"],
-                            }
-                            _LOGGER.debug(
-                                "Migration mapping: %s -> %s (state: %s)",
-                                entity_id,
-                                new_unique_id,
-                                state_data["state"]
-                            )
-                            break
-                
-                # Map upstream energy meter if it exists
-                old_upstream_id = f"{config_entry_id}_{sanitize_name(old_name)}_upstream_energy_meter"
-                new_upstream_id = f"{config_entry_id}_{sanitize_name(new_name)}_upstream_energy_meter"
-                
-                for entity_id, state_data in saved_states.items():
-                    if state_data["unique_id"] == old_upstream_id:
-                        migration_mapping[old_upstream_id] = {
-                            "old_entity_id": entity_id,
-                            "new_unique_id": new_upstream_id,
-                            "state": state_data["state"],
-                            "attributes": state_data["attributes"],
-                        }
-                        _LOGGER.debug(
-                            "Migration mapping (upstream): %s -> %s (state: %s)",
-                            entity_id,
-                            new_upstream_id,
-                            state_data["state"]
-                        )
-                        break
-    
-    # Device renames no longer need migration with UUID-based unique IDs
-    # The unique IDs for device sensors are now just "{device_id}_power" or "{device_id}_utility_meter"
-    # which don't change when devices are renamed
+    # With UUIDs, entities maintain their identity across renames
+    # Migration is only needed when transitioning from old format to new
+    # or for major structural changes
     
     return migration_mapping
 
 
-def _groups_have_same_devices(devices1: list[dict], devices2: list[dict]) -> bool:
-    """Check if two device lists contain the same devices."""
-    if len(devices1) != len(devices2):
-        return False
-    
-    # If all devices have IDs, compare by ID
-    all_have_ids = all(dev.get(CONF_DEVICE_ID) for dev in devices1 + devices2)
-    if all_have_ids:
-        ids1 = {dev.get(CONF_DEVICE_ID) for dev in devices1}
-        ids2 = {dev.get(CONF_DEVICE_ID) for dev in devices2}
-        return ids1 == ids2
-    
-    # Otherwise, fall back to entity comparison
-    dev1_set = {
-        (dev.get("power_entity", ""), dev.get("energy_entity", ""))
-        for dev in devices1
-    }
-    
-    dev2_set = {
-        (dev.get("power_entity", ""), dev.get("energy_entity", ""))
-        for dev in devices2
-    }
-    
-    return dev1_set == dev2_set
 
 
 

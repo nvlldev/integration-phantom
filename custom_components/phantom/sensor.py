@@ -29,6 +29,7 @@ from .const import (
     CONF_DEVICE_ID,
     CONF_GROUPS,
     CONF_GROUP_NAME,
+    CONF_GROUP_ID,
     CONF_UPSTREAM_POWER_ENTITY,
     CONF_UPSTREAM_ENERGY_ENTITY,
     DOMAIN,
@@ -57,13 +58,15 @@ async def async_setup_entry(
     
     for group_index, group in enumerate(groups):
         group_name = group.get(CONF_GROUP_NAME, f"Group {group_index + 1}")
+        group_id = group.get(CONF_GROUP_ID)
         devices = group.get(CONF_DEVICES, [])
         upstream_power_entity = group.get(CONF_UPSTREAM_POWER_ENTITY)
         upstream_energy_entity = group.get(CONF_UPSTREAM_ENERGY_ENTITY)
         
         _LOGGER.info(
-            "Setting up group '%s' (index %d) with %d devices, upstream_power=%s, upstream_energy=%s",
+            "Setting up group '%s' (id: %s, index %d) with %d devices, upstream_power=%s, upstream_energy=%s",
             group_name,
+            group_id,
             group_index,
             len(devices),
             upstream_power_entity,
@@ -76,6 +79,7 @@ async def async_setup_entry(
                 hass,
                 config_entry,
                 group_name,
+                group_id,
                 devices,
                 upstream_power_entity,
                 upstream_energy_entity,
@@ -105,12 +109,13 @@ async def _create_group_sensors(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
     group_name: str,
+    group_id: str | None,
     devices: list[dict[str, Any]],
     upstream_power_entity: str | None,
     upstream_energy_entity: str | None,
 ) -> list[SensorEntity]:
     """Create sensors for a single group."""
-    _LOGGER.debug("Creating sensors for group '%s'", group_name)
+    _LOGGER.debug("Creating sensors for group '%s' (id: %s)", group_name, group_id)
     entities = []
     
     # Collect power and energy entities from devices
@@ -169,6 +174,7 @@ async def _create_group_sensors(
             PhantomPowerSensor(
                 config_entry.entry_id,
                 group_name,
+                group_id,
                 power_entities,
             )
         )
@@ -183,6 +189,7 @@ async def _create_group_sensors(
                 hass,
                 config_entry.entry_id,
                 group_name,
+                group_id,
                 devices,
             )
         )
@@ -196,6 +203,7 @@ async def _create_group_sensors(
             PhantomUpstreamPowerSensor(
                 config_entry.entry_id,
                 group_name,
+                group_id,
                 upstream_power_entity,
             )
         )
@@ -207,6 +215,7 @@ async def _create_group_sensors(
                 PhantomPowerRemainderSensor(
                     config_entry.entry_id,
                     group_name,
+                    group_id,
                     upstream_power_entity,
                     power_entities,
                 )
@@ -219,6 +228,7 @@ async def _create_group_sensors(
                 hass,
                 config_entry.entry_id,
                 group_name,
+                group_id,
                 upstream_energy_entity,
             )
         )
@@ -231,6 +241,7 @@ async def _create_group_sensors(
                     hass,
                     config_entry.entry_id,
                     group_name,
+                    group_id,
                     upstream_energy_entity,
                     devices,
                 )
@@ -253,13 +264,20 @@ class PhantomBaseSensor(SensorEntity):
         self,
         config_entry_id: str,
         group_name: str,
+        group_id: str | None,
         sensor_type: str,
     ) -> None:
         """Initialize the sensor."""
         self._config_entry_id = config_entry_id
         self._group_name = group_name
+        self._group_id = group_id
         self._sensor_type = sensor_type
-        self._attr_unique_id = f"{config_entry_id}_{sanitize_name(group_name)}_{sensor_type}"
+        
+        # Use group UUID if available, otherwise fall back to old format
+        if group_id:
+            self._attr_unique_id = f"{group_id}_{sensor_type}"
+        else:
+            self._attr_unique_id = f"{config_entry_id}_{sanitize_name(group_name)}_{sensor_type}"
     
     @property
     def device_info(self) -> DeviceInfo:
@@ -284,10 +302,11 @@ class PhantomPowerSensor(PhantomBaseSensor):
         self,
         config_entry_id: str,
         group_name: str,
+        group_id: str | None,
         power_entities: list[str],
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(config_entry_id, group_name, "power_total")
+        super().__init__(config_entry_id, group_name, group_id, "power_total")
         self._power_entities = power_entities
         self._attr_name = "Power Total"
     
@@ -347,10 +366,11 @@ class PhantomEnergySensor(PhantomBaseSensor, RestoreEntity):
         hass: HomeAssistant,
         config_entry_id: str,
         group_name: str,
+        group_id: str | None,
         devices: list[dict[str, Any]],
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(config_entry_id, group_name, "energy_total")
+        super().__init__(config_entry_id, group_name, group_id, "energy_total")
         self._hass = hass
         self._devices = devices
         self._attr_name = "Energy Total"
@@ -715,10 +735,11 @@ class PhantomUpstreamPowerSensor(PhantomBaseSensor):
         self,
         config_entry_id: str,
         group_name: str,
+        group_id: str | None,
         upstream_entity: str,
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(config_entry_id, group_name, "upstream_power")
+        super().__init__(config_entry_id, group_name, group_id, "upstream_power")
         self._upstream_entity = upstream_entity
         self._attr_name = "Upstream Power"
     
@@ -778,10 +799,11 @@ class PhantomUpstreamEnergyMeterSensor(PhantomBaseSensor, RestoreEntity):
         hass: HomeAssistant,
         config_entry_id: str,
         group_name: str,
+        group_id: str | None,
         upstream_entity: str,
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(config_entry_id, group_name, "upstream_energy_meter")
+        super().__init__(config_entry_id, group_name, group_id, "upstream_energy_meter")
         self._hass = hass
         self._upstream_entity = upstream_entity
         self._attr_name = "Upstream Energy Meter"
@@ -918,11 +940,12 @@ class PhantomPowerRemainderSensor(PhantomBaseSensor):
         self,
         config_entry_id: str,
         group_name: str,
+        group_id: str | None,
         upstream_entity: str,
         power_entities: list[str],
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(config_entry_id, group_name, "power_remainder")
+        super().__init__(config_entry_id, group_name, group_id, "power_remainder")
         self._upstream_entity = upstream_entity
         self._power_entities = power_entities
         self._attr_name = "Power Remainder"
@@ -999,11 +1022,12 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor):
         hass: HomeAssistant,
         config_entry_id: str,
         group_name: str,
+        group_id: str | None,
         upstream_entity: str,
         devices: list[dict[str, Any]],
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(config_entry_id, group_name, "energy_remainder")
+        super().__init__(config_entry_id, group_name, group_id, "energy_remainder")
         self._hass = hass
         self._upstream_entity = upstream_entity
         self._devices = devices
@@ -1081,7 +1105,10 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor):
         entity_registry = er.async_get(self.hass)
         
         # Generate expected unique ID for upstream meter
-        expected_unique_id = f"{self._config_entry_id}_{sanitize_name(self._group_name)}_upstream_energy_meter"
+        if self._group_id:
+            expected_unique_id = f"{self._group_id}_upstream_energy_meter"
+        else:
+            expected_unique_id = f"{self._config_entry_id}_{sanitize_name(self._group_name)}_upstream_energy_meter"
         
         _LOGGER.debug(
             "Looking for upstream meter entity with unique_id: %s",

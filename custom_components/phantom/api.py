@@ -10,7 +10,7 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
-from .const import CONF_DEVICES, CONF_UPSTREAM_POWER_ENTITY, CONF_UPSTREAM_ENERGY_ENTITY, CONF_GROUPS, CONF_GROUP_NAME, CONF_DEVICE_ID, DOMAIN
+from .const import CONF_DEVICES, CONF_UPSTREAM_POWER_ENTITY, CONF_UPSTREAM_ENERGY_ENTITY, CONF_GROUPS, CONF_GROUP_NAME, CONF_GROUP_ID, CONF_DEVICE_ID, DOMAIN
 from .state_migration import save_current_states_for_migration, create_migration_mapping, store_migration_data
 
 _LOGGER = logging.getLogger(__name__)
@@ -59,6 +59,7 @@ def ws_get_config(
         vol.Required("type"): "phantom/save_config",
         vol.Required("groups"): [
             {
+                vol.Optional(CONF_GROUP_ID): str,
                 vol.Required(CONF_GROUP_NAME): str,
                 vol.Required(CONF_DEVICES): [
                     {
@@ -101,9 +102,16 @@ def ws_save_config(
     
     for group in groups:
         group_name = group.get(CONF_GROUP_NAME, "").strip()
+        group_id = group.get(CONF_GROUP_ID)
+        
         if not group_name:
             _LOGGER.debug("Skipping group with empty name")
             continue
+        
+        # Generate UUID if not present
+        if not group_id:
+            group_id = str(uuid.uuid4())
+            _LOGGER.info("Generated new UUID for group '%s': %s", group_name, group_id)
             
         # Validate devices in group
         devices = group.get(CONF_DEVICES, [])
@@ -161,6 +169,7 @@ def ws_save_config(
             upstream_energy = None
         
         valid_groups.append({
+            CONF_GROUP_ID: group_id,
             CONF_GROUP_NAME: group_name,
             CONF_DEVICES: valid_devices,
             CONF_UPSTREAM_POWER_ENTITY: upstream_power,
