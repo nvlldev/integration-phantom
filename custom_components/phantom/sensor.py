@@ -255,7 +255,7 @@ async def _create_group_sensors(
 
 
 class PhantomBaseSensor(SensorEntity):
-    """Base class for Phantom sensors."""
+    """Base class for Phantom group sensors."""
     
     _attr_has_entity_name = True
     _attr_should_poll = False
@@ -282,6 +282,42 @@ class PhantomBaseSensor(SensorEntity):
     @property
     def device_info(self) -> DeviceInfo:
         """Return device information."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"{self._config_entry_id}_{sanitize_name(self._group_name)}")},
+            name=f"Phantom {self._group_name}",
+            manufacturer="Phantom",
+            model="Power Monitor",
+        )
+
+
+class PhantomDeviceSensor(SensorEntity):
+    """Base class for Phantom device sensors."""
+    
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    
+    def __init__(
+        self,
+        config_entry_id: str,
+        group_name: str,
+        device_name: str,
+        device_id: str,
+        sensor_type: str,
+    ) -> None:
+        """Initialize the sensor."""
+        self._config_entry_id = config_entry_id
+        self._group_name = group_name
+        self._device_name = device_name
+        self._device_id = device_id
+        self._sensor_type = sensor_type
+        
+        # Device sensors use device UUID for unique_id
+        self._attr_unique_id = f"{device_id}_{sensor_type}"
+    
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information."""
+        # Device sensors belong to the same group device
         return DeviceInfo(
             identifiers={(DOMAIN, f"{self._config_entry_id}_{sanitize_name(self._group_name)}")},
             name=f"Phantom {self._group_name}",
@@ -494,7 +530,7 @@ class PhantomEnergySensor(PhantomBaseSensor, RestoreEntity):
             self._attr_native_value = round(total, 3)
 
 
-class PhantomIndividualPowerSensor(PhantomBaseSensor):
+class PhantomIndividualPowerSensor(PhantomDeviceSensor):
     """Sensor for individual device power."""
     
     _attr_device_class = SensorDeviceClass.POWER
@@ -510,12 +546,7 @@ class PhantomIndividualPowerSensor(PhantomBaseSensor):
         power_entity: str,
     ) -> None:
         """Initialize the sensor."""
-        # Initialize parent with None for group_id since we'll override unique_id anyway
-        super().__init__(config_entry_id, group_name, None, f"power_{sanitize_name(device_name)}")
-        # Use simple device UUID as unique_id for device-specific sensors
-        self._attr_unique_id = f"{device_id}_power"
-        self._device_name = device_name
-        self._device_id = device_id
+        super().__init__(config_entry_id, group_name, device_name, device_id, "power")
         self._power_entity = power_entity
         self._attr_name = f"{device_name} Power"
     
@@ -563,7 +594,7 @@ class PhantomIndividualPowerSensor(PhantomBaseSensor):
                 self._attr_native_value = None
 
 
-class PhantomUtilityMeterSensor(PhantomBaseSensor, RestoreEntity):
+class PhantomUtilityMeterSensor(PhantomDeviceSensor, RestoreEntity):
     """Sensor that tracks energy consumption for a device."""
     
     _attr_device_class = SensorDeviceClass.ENERGY
@@ -589,13 +620,8 @@ class PhantomUtilityMeterSensor(PhantomBaseSensor, RestoreEntity):
         energy_entity: str,
     ) -> None:
         """Initialize the sensor."""
-        # Initialize parent with None for group_id since we'll override unique_id anyway
-        super().__init__(config_entry_id, group_name, None, f"utility_meter_{sanitize_name(device_name)}")
-        # Use simple device UUID as unique_id for device-specific sensors
-        self._attr_unique_id = f"{device_id}_utility_meter"
+        super().__init__(config_entry_id, group_name, device_name, device_id, "utility_meter")
         self._hass = hass
-        self._device_name = device_name
-        self._device_id = device_id
         self._energy_entity = energy_entity
         self._attr_name = f"{device_name} Energy Meter"
         self._last_value = None
