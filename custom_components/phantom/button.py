@@ -91,46 +91,35 @@ class PhantomResetButton(ButtonEntity):
     
     async def async_press(self) -> None:
         """Handle button press."""
-        _LOGGER.info("Resetting energy meters for group '%s'", self._group_name)
+        _LOGGER.info("Reset button pressed for group '%s' (id: %s)", self._group_name, self._group_id)
         
-        # Get stored resetable entities
-        resetable_entities = (
+        # Get entities for this group
+        entities_by_group = (
             self._hass.data.get(DOMAIN, {})
             .get(self._config_entry_id, {})
-            .get("entities", {})
-            .get("resetable", [])
+            .get("entities_by_group", {})
         )
         
-        if not resetable_entities:
-            _LOGGER.warning("No resetable entities found for config entry")
-            return
+        group_entities = entities_by_group.get(self._group_name, [])
+        _LOGGER.info("Found %d resetable entities for group '%s'", len(group_entities), self._group_name)
         
-        # Find entities that belong to this group
+        # Reset each entity
         reset_count = 0
-        for entity in resetable_entities:
-            # Check if this entity belongs to our group
-            belongs_to_group = False
-            
-            # Check if it's a device utility meter for this group
-            if hasattr(entity, "_group_name") and entity._group_name == self._group_name:
-                if hasattr(entity, "_device_id"):
-                    # It's a device utility meter
-                    for device in self._devices:
-                        if device.get(CONF_DEVICE_ID) == entity._device_id:
-                            belongs_to_group = True
-                            break
-                elif hasattr(entity, "_group_id"):
-                    # It's an upstream meter
-                    if entity._group_id == self._group_id:
-                        belongs_to_group = True
-            
-            if belongs_to_group and hasattr(entity, "async_reset"):
-                await entity.async_reset()
-                reset_count += 1
-                _LOGGER.debug("Reset utility meter: %s", entity.entity_id)
+        for entity in group_entities:
+            try:
+                if hasattr(entity, "async_reset"):
+                    await entity.async_reset()
+                    reset_count += 1
+                    entity_id = getattr(entity, "entity_id", "unknown")
+                    _LOGGER.info("Reset utility meter: %s", entity_id)
+                else:
+                    _LOGGER.warning("Entity does not have async_reset method: %s", entity)
+            except Exception as e:
+                entity_id = getattr(entity, "entity_id", "unknown")
+                _LOGGER.error("Failed to reset entity %s: %s", entity_id, e)
         
         _LOGGER.info(
-            "Reset %d utility meters for group '%s'",
+            "Successfully reset %d utility meters for group '%s'",
             reset_count,
             self._group_name
         )

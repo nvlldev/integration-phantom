@@ -5,10 +5,7 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.helpers import entity_registry as er
-import voluptuous as vol
-from homeassistant.helpers import config_validation as cv
+from homeassistant.core import HomeAssistant
 
 from .api import async_setup_api
 from .const import DOMAIN
@@ -49,9 +46,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    
-    # Store entities for reset functionality
-    hass.data[DOMAIN][entry.entry_id]["entities"] = {}
     
     # Don't add update listener - we'll handle reloads manually
     

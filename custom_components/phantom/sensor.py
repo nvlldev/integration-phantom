@@ -93,15 +93,17 @@ async def async_setup_entry(
     if entities:
         async_add_entities(entities)
         
-        # Store resetable entities for the button
-        resetable_entities = []
-        for entity in entities:
-            if hasattr(entity, "async_reset"):
-                resetable_entities.append(entity)
+        # Store entities by group for reset functionality
+        if "entities_by_group" not in hass.data[DOMAIN][config_entry.entry_id]:
+            hass.data[DOMAIN][config_entry.entry_id]["entities_by_group"] = {}
         
-        if "entities" not in hass.data[DOMAIN][config_entry.entry_id]:
-            hass.data[DOMAIN][config_entry.entry_id]["entities"] = {}
-        hass.data[DOMAIN][config_entry.entry_id]["entities"]["resetable"] = resetable_entities
+        # Group entities by their group name
+        for entity in entities:
+            if hasattr(entity, "_group_name") and hasattr(entity, "async_reset"):
+                group_name = entity._group_name
+                if group_name not in hass.data[DOMAIN][config_entry.entry_id]["entities_by_group"]:
+                    hass.data[DOMAIN][config_entry.entry_id]["entities_by_group"][group_name] = []
+                hass.data[DOMAIN][config_entry.entry_id]["entities_by_group"][group_name].append(entity)
         
         # Schedule clearing migration data after entities have been initialized
         async def clear_migration_after_delay():
