@@ -6,6 +6,7 @@ from typing import Any
 
 from homeassistant.components import frontend
 from homeassistant.core import HomeAssistant
+from homeassistant.components.http import StaticPathConfig
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -14,11 +15,13 @@ async def async_register_panel(hass: HomeAssistant) -> None:
     """Register the Phantom configuration panel."""
     # Register static path for panel files
     panel_dir = hass.config.path("custom_components/phantom/panel")
-    hass.http.register_static_path(
-        "/phantom-static", 
-        panel_dir,
-        True
-    )
+    await hass.http.async_register_static_paths([
+        StaticPathConfig(
+            url_path="/phantom-static",
+            path=panel_dir,
+            cache_headers=True
+        )
+    ])
     _LOGGER.info("Registered static path for panel files: %s -> /phantom-static", panel_dir)
     
     try:
