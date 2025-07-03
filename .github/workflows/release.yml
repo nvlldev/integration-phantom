@@ -112,6 +112,8 @@ jobs:
             2. Install "${{ steps.integration.outputs.display_name }}" from HACS
             3. Restart Home Assistant
             
+            Note: HACS will automatically download `${{ steps.integration.outputs.name }}.zip` from this release.
+            
             ### Manual Installation
             1. Download `${{ steps.integration.outputs.name }}-${{ steps.tag.outputs.tag }}.zip` from this release
             2. Extract the `${{ steps.integration.outputs.name }}` folder to your `custom_components` directory
@@ -142,4 +144,14 @@ jobs:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./${{ steps.integration.outputs.name }}-hacs-${{ steps.tag.outputs.tag }}.zip
           asset_name: ${{ steps.integration.outputs.name }}-hacs-${{ steps.tag.outputs.tag }}.zip
+          asset_content_type: application/zip
+          
+      - name: Upload Release Asset (HACS filename)
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./${{ steps.integration.outputs.name }}-hacs-${{ steps.tag.outputs.tag }}.zip
+          asset_name: ${{ steps.integration.outputs.name }}.zip
           asset_content_type: application/zip

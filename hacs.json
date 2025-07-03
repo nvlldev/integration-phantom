@@ -1,5 +1,6 @@
 {
     "name": "Phantom",
     "render_readme": true,
-    "zip_release": false
+    "zip_release": true,
+    "filename": "phantom.zip"
 }
