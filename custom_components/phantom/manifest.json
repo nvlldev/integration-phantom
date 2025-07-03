@@ -5,6 +5,7 @@
   "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/scottpetersen/phantom",
+  "issue_tracker": "https://github.com/nvlldev/integration-phantom/issues",
   "integration_type": "device",
   "iot_class": "calculated",
   "requirements": [],
