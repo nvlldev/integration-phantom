@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Testing
+.coverage
+.pytest_cache/
+htmlcov/
+.tox/
+.coverage.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Home Assistant
+.storage/
+deps/
+
+# Temporary files
+*.tmp
+*.log
+
+# Local development
+requirements-test.txt
+run_tests.py
+TARIFF_*.md
