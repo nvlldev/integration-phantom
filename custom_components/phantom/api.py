@@ -10,7 +10,14 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
-from .const import CONF_DEVICES, CONF_UPSTREAM_POWER_ENTITY, CONF_UPSTREAM_ENERGY_ENTITY, CONF_GROUPS, CONF_GROUP_NAME, CONF_GROUP_ID, CONF_DEVICE_ID, DOMAIN
+from .const import (
+    CONF_DEVICES, CONF_UPSTREAM_POWER_ENTITY, CONF_UPSTREAM_ENERGY_ENTITY, 
+    CONF_GROUPS, CONF_GROUP_NAME, CONF_GROUP_ID, CONF_DEVICE_ID, DOMAIN,
+    CONF_TARIFF, CONF_TARIFF_ENABLED, CONF_TARIFF_CURRENCY, CONF_TARIFF_CURRENCY_SYMBOL,
+    CONF_TARIFF_RATE_STRUCTURE, CONF_TARIFF_RATE_TYPE, CONF_TARIFF_FLAT_RATE,
+    CONF_TARIFF_TOU_RATES, CONF_TOU_NAME, CONF_TOU_RATE, CONF_TOU_START_TIME,
+    CONF_TOU_END_TIME, CONF_TOU_DAYS, CONF_TARIFF_RATE_ENTITY, CONF_TARIFF_PERIOD_ENTITY
+)
 from .state_migration import save_current_states_for_migration, create_migration_mapping, store_migration_data
 
 _LOGGER = logging.getLogger(__name__)
@@ -48,8 +55,11 @@ def ws_get_config(
     # Get current configuration
     config = hass.data.get(DOMAIN, {}).get(config_entry.entry_id, {})
     
-    # Return groups configuration
-    result = {"groups": config.get(CONF_GROUPS, [])}
+    # Return groups configuration and global tariff
+    result = {
+        "groups": config.get(CONF_GROUPS, []),
+        "tariff": config.get(CONF_TARIFF)
+    }
     
     connection.send_result(msg["id"], result)
 
@@ -73,6 +83,7 @@ def ws_get_config(
                 vol.Optional(CONF_UPSTREAM_ENERGY_ENTITY, default=None): vol.Any(str, None),
             }
         ],
+        vol.Optional("tariff"): vol.Any(dict, None),
     }
 )
 @callback
@@ -186,6 +197,10 @@ def ws_save_config(
     
     # Prepare new configuration
     new_data = {CONF_GROUPS: valid_groups}
+    
+    # Add tariff configuration if provided
+    if "tariff" in msg and msg["tariff"]:
+        new_data[CONF_TARIFF] = msg["tariff"]
     
     # Get old configuration before updating
     old_data = dict(hass.data[DOMAIN][config_entry.entry_id])

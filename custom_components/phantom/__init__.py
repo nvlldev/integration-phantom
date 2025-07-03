@@ -55,6 +55,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+        # Cleanup tariff managers if any
+        entry_data = hass.data[DOMAIN].get(entry.entry_id, {})
+        if "tariff_managers" in entry_data:
+            for manager in entry_data["tariff_managers"]:
+                if hasattr(manager, "cleanup"):
+                    manager.cleanup()
+        
+        # Cancel any pending total cost sensor creation tasks
+        if "total_cost_tasks" in entry_data:
+            for task in entry_data["total_cost_tasks"]:
+                if not task.done():
+                    task.cancel()
+        
         hass.data[DOMAIN].pop(entry.entry_id)
 
     return unload_ok

@@ -36,12 +36,23 @@ jobs:
         id: tag
         run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
       
+      - name: Get integration name
+        id: integration
+        run: |
+          # Auto-detect integration name from directory structure
+          INTEGRATION_NAME=$(ls custom_components/ | head -n 1)
+          echo "name=$INTEGRATION_NAME" >> $GITHUB_OUTPUT
+          
+          # Create display name (replace underscores with spaces and title case)
+          DISPLAY_NAME=$(echo "$INTEGRATION_NAME" | sed 's/_/ /g' | sed 's/\b\w/\U&/g')
+          echo "display_name=$DISPLAY_NAME" >> $GITHUB_OUTPUT
+
       - name: Get previous tag
         id: previous_tag
         run: |
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 ${{ steps.tag.outputs.tag }}^ 2>/dev/null || echo "")
           echo "previous_tag=$PREVIOUS_TAG" >> $GITHUB_OUTPUT
-      
+
       - name: Generate changelog
         id: changelog
         run: |
@@ -57,22 +68,32 @@ jobs:
           CHANGELOG="${CHANGELOG//$'\r'/'%0D'}"
           
           echo "changelog=$CHANGELOG" >> $GITHUB_OUTPUT
-      
+
+      - name: Check if prerelease
+        id: prerelease
+        run: |
+          if [[ "${{ steps.tag.outputs.tag }}" =~ -(alpha|beta|rc|pre) ]] || [[ "${{ steps.tag.outputs.tag }}" == *-* ]]; then
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Create release directory
         run: |
-          mkdir -p phantom
-          cp -r custom_components/phantom/* phantom/
-          
-      - name: Create zip file
+          mkdir -p release/${{ steps.integration.outputs.name }}
+          cp -r custom_components/${{ steps.integration.outputs.name }}/* release/${{ steps.integration.outputs.name }}/
+
+      - name: Create zip file (Manual Install)
         run: |
-          zip -r phantom-${{ steps.tag.outputs.tag }}.zip phantom/
-          
+          cd release
+          zip -r ../${{ steps.integration.outputs.name }}-${{ steps.tag.outputs.tag }}.zip ${{ steps.integration.outputs.name }}
+
       - name: Create HACS zip (without outer directory)
         run: |
-          cd custom_components/phantom
-          zip -r ../../phantom-hacs-${{ steps.tag.outputs.tag }}.zip .
+          cd custom_components/${{ steps.integration.outputs.name }}
+          zip -r ../../${{ steps.integration.outputs.name }}-hacs-${{ steps.tag.outputs.tag }}.zip .
           cd ../..
-          
+
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
@@ -80,7 +101,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
-          release_name: Phantom Power Monitoring ${{ steps.tag.outputs.tag }}
+          release_name: ${{ steps.integration.outputs.display_name }} ${{ steps.tag.outputs.tag }}
           body: |
             ## Installation
             
@@ -88,12 +109,12 @@ jobs:
             [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=${{ github.repository_owner }}&repository=${{ github.event.repository.name }}&category=integration)
             
             1. Click the button above or add this repository to HACS as a custom repository
-            2. Install "Phantom Power Monitoring" from HACS
+            2. Install "${{ steps.integration.outputs.display_name }}" from HACS
             3. Restart Home Assistant
             
             ### Manual Installation
-            1. Download `phantom-${{ steps.tag.outputs.tag }}.zip` from this release
-            2. Extract the `phantom` folder to your `custom_components` directory
+            1. Download `${{ steps.integration.outputs.name }}-${{ steps.tag.outputs.tag }}.zip` from this release
+            2. Extract the `${{ steps.integration.outputs.name }}` folder to your `custom_components` directory
             3. Restart Home Assistant
             
             ## What's Changed
@@ -101,24 +122,24 @@ jobs:
             
             **Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ steps.previous_tag.outputs.previous_tag }}...${{ steps.tag.outputs.tag }}
           draft: false
-          prerelease: ${{ contains(steps.tag.outputs.tag, '-') }}
-      
+          prerelease: ${{ steps.prerelease.outputs.prerelease }}
+
       - name: Upload Release Asset (Manual Install)
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./phantom-${{ steps.tag.outputs.tag }}.zip
-          asset_name: phantom-${{ steps.tag.outputs.tag }}.zip
+          asset_path: ./${{ steps.integration.outputs.name }}-${{ steps.tag.outputs.tag }}.zip
+          asset_name: ${{ steps.integration.outputs.name }}-${{ steps.tag.outputs.tag }}.zip
           asset_content_type: application/zip
-          
+
       - name: Upload Release Asset (HACS)
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./phantom-hacs-${{ steps.tag.outputs.tag }}.zip
-          asset_name: phantom-hacs-${{ steps.tag.outputs.tag }}.zip
+          asset_path: ./${{ steps.integration.outputs.name }}-hacs-${{ steps.tag.outputs.tag }}.zip
+          asset_name: ${{ steps.integration.outputs.name }}-hacs-${{ steps.tag.outputs.tag }}.zip
           asset_content_type: application/zip

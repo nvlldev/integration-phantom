@@ -1,0 +1,1 @@
+"""Tests for the Phantom Power Monitoring integration."""
