@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to bump to (e.g., 1.2.3)'
+        description: 'Version to bump to (e.g., 1.2.3 or 1.2.3-beta)'
         required: true
         type: string
 
@@ -13,37 +13,89 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          
+
       - name: Validate version format
         run: |
           if ! [[ "${{ github.event.inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$ ]]; then
-            echo "Error: Version must be in format X.Y.Z or X.Y.Z-beta"
+            echo "Error: Version must be in format X.Y.Z or X.Y.Z-suffix (e.g., 1.2.3 or 1.2.3-beta)"
             exit 1
           fi
-          
+
+      - name: Get integration name
+        id: integration
+        run: |
+          # Auto-detect integration name from directory structure
+          INTEGRATION_NAME=$(ls custom_components/ | head -n 1)
+          echo "name=$INTEGRATION_NAME" >> $GITHUB_OUTPUT
+          echo "Found integration: $INTEGRATION_NAME"
+
+      - name: Check if manifest exists
+        run: |
+          MANIFEST_PATH="custom_components/${{ steps.integration.outputs.name }}/manifest.json"
+          if [ ! -f "$MANIFEST_PATH" ]; then
+            echo "Error: manifest.json not found at $MANIFEST_PATH"
+            exit 1
+          fi
+          echo "Found manifest at: $MANIFEST_PATH"
+
       - name: Update manifest.json
         run: |
           VERSION="${{ github.event.inputs.version }}"
-          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" custom_components/phantom/manifest.json
+          MANIFEST_PATH="custom_components/${{ steps.integration.outputs.name }}/manifest.json"
           
+          # Update version in manifest.json
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$MANIFEST_PATH"
+          
+          # Verify the update worked
+          if grep -q "\"version\": \"$VERSION\"" "$MANIFEST_PATH"; then
+            echo "✅ Successfully updated version to $VERSION"
+          else
+            echo "❌ Failed to update version in manifest.json"
+            exit 1
+          fi
+
+      - name: Show changes
+        run: |
+          echo "Changes made:"
+          git diff --no-index /dev/null custom_components/${{ steps.integration.outputs.name }}/manifest.json || true
+
       - name: Commit changes
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add custom_components/phantom/manifest.json
-          git commit -m "Bump version to ${{ github.event.inputs.version }}"
+          git add custom_components/${{ steps.integration.outputs.name }}/manifest.json
           
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+            exit 1
+          fi
+          
+          git commit -m "Bump version to ${{ github.event.inputs.version }}"
+
       - name: Push changes
         run: |
           git push
-          
-      - name: Create tag
+
+      - name: Create and push tag
         run: |
-          git tag "v${{ github.event.inputs.version }}"
-          git push origin "v${{ github.event.inputs.version }}"
+          TAG="v${{ github.event.inputs.version }}"
+          git tag "$TAG"
+          git push origin "$TAG"
+          echo "✅ Created and pushed tag: $TAG"
+
+      - name: Summary
+        run: |
+          echo "## Version Bump Complete! 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Integration:** ${{ steps.integration.outputs.name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **New Version:** ${{ github.event.inputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag Created:** v${{ github.event.inputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The release workflow should now trigger automatically!" >> $GITHUB_STEP_SUMMARY
