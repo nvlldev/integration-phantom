@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.components.sensor import SensorStateClass
@@ -87,7 +87,8 @@ class PhantomDeviceHourlyCostSensor(PhantomDeviceSensor):
         # Update every minute to catch rate changes
         self._update_state()
         self.async_on_remove(
-            self.hass.helpers.event.async_track_time_interval(
+            async_track_time_interval(
+                self.hass,
                 self._handle_time_update,
                 timedelta(minutes=1)
             )
@@ -189,7 +190,8 @@ class PhantomGroupHourlyCostSensor(PhantomBaseSensor):
         # Update every minute to catch rate changes
         self._update_state()
         self.async_on_remove(
-            self.hass.helpers.event.async_track_time_interval(
+            async_track_time_interval(
+                self.hass,
                 self._handle_time_update,
                 timedelta(minutes=1)
             )
@@ -284,7 +286,8 @@ class PhantomTouRateSensor(PhantomBaseSensor):
         # Update every minute to catch rate changes
         self._update_state()
         self.async_on_remove(
-            self.hass.helpers.event.async_track_time_interval(
+            async_track_time_interval(
+                self.hass,
                 self._handle_time_update,
                 timedelta(minutes=1)
             )
@@ -330,6 +333,8 @@ class PhantomDeviceTotalCostSensor(PhantomDeviceSensor, RestoreEntity):
         self._attr_native_unit_of_measurement = tariff_manager.currency
         self._last_meter_value = None
         self._total_cost = 0.0
+        self._last_rate = None
+        self._last_update_time = None
         
     @property
     def extra_state_attributes(self):
@@ -411,6 +416,9 @@ class PhantomDeviceTotalCostSensor(PhantomDeviceSensor, RestoreEntity):
                     self._utility_meter_entity
                 )
                 self._attr_available = True
+                # Initialize tracking variables
+                self._last_rate = self._tariff_manager.get_current_rate()
+                self._last_update_time = datetime.now()
             except (ValueError, TypeError) as err:
                 _LOGGER.error(
                     "Error parsing initial meter value for %s: %s (value: %s)",
@@ -514,6 +522,10 @@ class PhantomDeviceTotalCostSensor(PhantomDeviceSensor, RestoreEntity):
                         self._total_cost,
                         self._tariff_manager.currency
                     )
+                    
+                    # Update tracking for rate changes
+                    self._last_rate = current_rate
+                    self._last_update_time = datetime.now()
                 elif meter_diff < -0.000001:  # Negative change (meter reset)
                     # Meter was reset
                     _LOGGER.info(
@@ -558,11 +570,68 @@ class PhantomDeviceTotalCostSensor(PhantomDeviceSensor, RestoreEntity):
         """Force periodic update to keep graphs smooth and responsive."""
         # Only update if we have valid data
         if self._attr_available and self._attr_native_value is not None:
+            current_rate = self._tariff_manager.get_current_rate()
+            
+            # Check if we need to handle a rate change during constant power consumption
+            if (self._last_rate is not None and 
+                self._last_update_time is not None and
+                current_rate != self._last_rate and
+                self._last_meter_value is not None):
+                
+                # Get current meter value to check if there's ongoing consumption
+                meter_state = self.hass.states.get(self._utility_meter_entity)
+                if meter_state and meter_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                    try:
+                        current_meter_value = float(meter_state.state)
+                        
+                        # If meter hasn't changed, we need to estimate consumption based on time
+                        # This handles the case where power is constant during a rate change
+                        if abs(current_meter_value - self._last_meter_value) < 0.000001:
+                            # Calculate time-based estimation if we have a power entity
+                            power_entity_id = self._utility_meter_entity.replace("_energy_daily", "")
+                            power_state = self.hass.states.get(power_entity_id)
+                            
+                            if power_state and power_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                                try:
+                                    power_watts = float(power_state.state)
+                                    if power_watts > 0:
+                                        # Calculate energy consumed since last update
+                                        time_diff = (now - self._last_update_time).total_seconds() / 3600  # hours
+                                        estimated_energy = (power_watts / 1000) * time_diff  # kWh
+                                        
+                                        # Calculate cost at the old rate for the period
+                                        cost_at_old_rate = self._tariff_manager.calculate_energy_cost(
+                                            estimated_energy, self._last_rate
+                                        )
+                                        
+                                        # Add the cost
+                                        self._total_cost += cost_at_old_rate
+                                        self._attr_native_value = self._total_cost
+                                        
+                                        _LOGGER.info(
+                                            "Applied TOU rate change for %s: %.3f kWh at old rate %.3f %s/kWh = %.6f %s",
+                                            self._device_name,
+                                            estimated_energy,
+                                            self._last_rate,
+                                            self._tariff_manager.currency_symbol,
+                                            cost_at_old_rate,
+                                            self._tariff_manager.currency
+                                        )
+                                except (ValueError, TypeError):
+                                    pass
+                    except (ValueError, TypeError):
+                        pass
+            
+            # Update tracking variables
+            self._last_rate = current_rate
+            self._last_update_time = now
+            
             _LOGGER.debug(
-                "Periodic update for %s total cost sensor: %.3f %s",
+                "Periodic update for %s total cost sensor: %.3f %s (rate: %.3f)",
                 self._device_name,
                 self._attr_native_value,
-                self._tariff_manager.currency
+                self._tariff_manager.currency,
+                current_rate
             )
             # Force state write to ensure UI updates
             self.async_write_ha_state()
