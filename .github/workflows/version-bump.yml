@@ -1,0 +1,49 @@
+name: Version Bump
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to bump to (e.g., 1.2.3)'
+        required: true
+        type: string
+
+jobs:
+  version-bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Validate version format
+        run: |
+          if ! [[ "${{ github.event.inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$ ]]; then
+            echo "Error: Version must be in format X.Y.Z or X.Y.Z-beta"
+            exit 1
+          fi
+          
+      - name: Update manifest.json
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" custom_components/phantom/manifest.json
+          
+      - name: Commit changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add custom_components/phantom/manifest.json
+          git commit -m "Bump version to ${{ github.event.inputs.version }}"
+          
+      - name: Push changes
+        run: |
+          git push
+          
+      - name: Create tag
+        run: |
+          git tag "v${{ github.event.inputs.version }}"
+          git push origin "v${{ github.event.inputs.version }}"

@@ -1,0 +1,124 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+      - 'v*.*.*-*'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    name: Validate with HACS
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: HACS validation
+        uses: hacs/action@main
+        with:
+          category: integration
+          ignore: brands
+
+  release:
+    runs-on: ubuntu-latest
+    needs: validate
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Get tag name
+        id: tag
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      
+      - name: Get previous tag
+        id: previous_tag
+        run: |
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 ${{ steps.tag.outputs.tag }}^ 2>/dev/null || echo "")
+          echo "previous_tag=$PREVIOUS_TAG" >> $GITHUB_OUTPUT
+      
+      - name: Generate changelog
+        id: changelog
+        run: |
+          if [ -n "${{ steps.previous_tag.outputs.previous_tag }}" ]; then
+            CHANGELOG=$(git log --pretty=format:"- %s" ${{ steps.previous_tag.outputs.previous_tag }}..${{ steps.tag.outputs.tag }} | grep -v "Merge" || true)
+          else
+            CHANGELOG=$(git log --pretty=format:"- %s" | grep -v "Merge" || true)
+          fi
+          
+          # Escape for GitHub Actions
+          CHANGELOG="${CHANGELOG//'%'/'%25'}"
+          CHANGELOG="${CHANGELOG//$'\n'/'%0A'}"
+          CHANGELOG="${CHANGELOG//$'\r'/'%0D'}"
+          
+          echo "changelog=$CHANGELOG" >> $GITHUB_OUTPUT
+      
+      - name: Create release directory
+        run: |
+          mkdir -p phantom
+          cp -r custom_components/phantom/* phantom/
+          
+      - name: Create zip file
+        run: |
+          zip -r phantom-${{ steps.tag.outputs.tag }}.zip phantom/
+          
+      - name: Create HACS zip (without outer directory)
+        run: |
+          cd custom_components/phantom
+          zip -r ../../phantom-hacs-${{ steps.tag.outputs.tag }}.zip .
+          cd ../..
+          
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          release_name: Phantom Power Monitoring ${{ steps.tag.outputs.tag }}
+          body: |
+            ## Installation
+            
+            ### HACS (Recommended)
+            [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=${{ github.repository_owner }}&repository=${{ github.event.repository.name }}&category=integration)
+            
+            1. Click the button above or add this repository to HACS as a custom repository
+            2. Install "Phantom Power Monitoring" from HACS
+            3. Restart Home Assistant
+            
+            ### Manual Installation
+            1. Download `phantom-${{ steps.tag.outputs.tag }}.zip` from this release
+            2. Extract the `phantom` folder to your `custom_components` directory
+            3. Restart Home Assistant
+            
+            ## What's Changed
+            ${{ steps.changelog.outputs.changelog }}
+            
+            **Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ steps.previous_tag.outputs.previous_tag }}...${{ steps.tag.outputs.tag }}
+          draft: false
+          prerelease: ${{ contains(steps.tag.outputs.tag, '-') }}
+      
+      - name: Upload Release Asset (Manual Install)
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./phantom-${{ steps.tag.outputs.tag }}.zip
+          asset_name: phantom-${{ steps.tag.outputs.tag }}.zip
+          asset_content_type: application/zip
+          
+      - name: Upload Release Asset (HACS)
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./phantom-hacs-${{ steps.tag.outputs.tag }}.zip
+          asset_name: phantom-hacs-${{ steps.tag.outputs.tag }}.zip
+          asset_content_type: application/zip
