@@ -27,6 +27,7 @@ class PhantomPowerSensor(PhantomBaseSensor):
     _attr_device_class = SensorDeviceClass.POWER
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 1
     _attr_icon = "mdi:flash"
     
     def __init__(
@@ -81,7 +82,7 @@ class PhantomPowerSensor(PhantomBaseSensor):
             self._attr_native_value = None
         else:
             self._attr_available = True
-            self._attr_native_value = round(total, 3)
+            self._attr_native_value = total
 
 
 class PhantomIndividualPowerSensor(PhantomDeviceSensor):
@@ -90,6 +91,7 @@ class PhantomIndividualPowerSensor(PhantomDeviceSensor):
     _attr_device_class = SensorDeviceClass.POWER
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 1
     
     def __init__(
         self,
@@ -141,7 +143,7 @@ class PhantomIndividualPowerSensor(PhantomDeviceSensor):
         else:
             self._attr_available = True
             try:
-                self._attr_native_value = round(float(state.state), 3)
+                self._attr_native_value = float(state.state)
             except (ValueError, TypeError):
                 _LOGGER.warning("Could not convert state to float: %s", state.state)
                 self._attr_available = False

@@ -41,6 +41,7 @@ class PhantomEnergySensor(PhantomBaseSensor, RestoreEntity):
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_suggested_display_precision = 3
     _attr_icon = "mdi:lightning-bolt"
     
     def __init__(
@@ -174,7 +175,7 @@ class PhantomEnergySensor(PhantomBaseSensor, RestoreEntity):
             self._attr_available = False
         else:
             self._attr_available = True
-            self._attr_native_value = round(total, 3)
+            self._attr_native_value = total
 
 
 class PhantomUtilityMeterSensor(PhantomDeviceSensor, RestoreEntity):
@@ -183,6 +184,7 @@ class PhantomUtilityMeterSensor(PhantomDeviceSensor, RestoreEntity):
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_suggested_display_precision = 3
     _attr_icon = "mdi:counter"
     
     @property
@@ -339,7 +341,7 @@ class PhantomUtilityMeterSensor(PhantomDeviceSensor, RestoreEntity):
             
             self._last_value = new_value
             self._attr_available = True
-            self._attr_native_value = round(self._total_consumed, 3)
+            self._attr_native_value = self._total_consumed
             
         except (ValueError, TypeError) as err:
             _LOGGER.warning("Could not update utility meter: %s", err)

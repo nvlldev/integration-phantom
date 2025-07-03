@@ -35,6 +35,7 @@ class PhantomDeviceHourlyCostSensor(PhantomDeviceSensor):
     
     _attr_device_class = None
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 2
     _attr_icon = "mdi:currency-usd"
     
     def __init__(
@@ -129,7 +130,7 @@ class PhantomDeviceHourlyCostSensor(PhantomDeviceSensor):
         cost_per_hour = self._tariff_manager.calculate_cost_per_hour(self._current_power)
         
         self._attr_available = True
-        self._attr_native_value = round(cost_per_hour, 3)
+        self._attr_native_value = cost_per_hour
 
 
 class PhantomGroupHourlyCostSensor(PhantomBaseSensor):
@@ -137,6 +138,7 @@ class PhantomGroupHourlyCostSensor(PhantomBaseSensor):
     
     _attr_device_class = None
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 2
     _attr_icon = "mdi:currency-usd"
     
     def __init__(
@@ -238,7 +240,7 @@ class PhantomGroupHourlyCostSensor(PhantomBaseSensor):
         cost_per_hour = self._tariff_manager.calculate_cost_per_hour(self._total_power)
         
         self._attr_available = True
-        self._attr_native_value = round(cost_per_hour, 3)
+        self._attr_native_value = cost_per_hour
 
 
 class PhantomTouRateSensor(PhantomBaseSensor):
@@ -246,6 +248,7 @@ class PhantomTouRateSensor(PhantomBaseSensor):
     
     _attr_device_class = None
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 3
     _attr_icon = "mdi:cash-multiple"
     
     def __init__(
@@ -296,7 +299,7 @@ class PhantomTouRateSensor(PhantomBaseSensor):
     @callback
     def _update_state(self) -> None:
         """Update the sensor state."""
-        self._attr_native_value = round(self._tariff_manager.get_current_rate(), 3)
+        self._attr_native_value = self._tariff_manager.get_current_rate()
         self._attr_available = True
 
 
@@ -305,6 +308,7 @@ class PhantomDeviceTotalCostSensor(PhantomDeviceSensor, RestoreEntity):
     
     _attr_device_class = None
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_suggested_display_precision = 2
     _attr_icon = "mdi:cash"
     
     def __init__(
@@ -498,7 +502,7 @@ class PhantomDeviceTotalCostSensor(PhantomDeviceSensor, RestoreEntity):
                     
                     # Add to total cost with full precision
                     self._total_cost += cost_delta
-                    self._attr_native_value = round(self._total_cost, 3)
+                    self._attr_native_value = self._total_cost
                     
                     _LOGGER.info(
                         "Device %s consumed %.6f kWh at rate %.3f %s/kWh, cost delta: %.6f, total: %.3f %s",
@@ -522,7 +526,7 @@ class PhantomDeviceTotalCostSensor(PhantomDeviceSensor, RestoreEntity):
                 else:
                     # Very small or no change, but still update native value
                     # This ensures the sensor appears "alive" in the UI
-                    self._attr_native_value = round(self._total_cost, 3)
+                    self._attr_native_value = self._total_cost
                     _LOGGER.debug(
                         "Minimal change for %s: meter diff %.9f kWh, total cost remains %.3f",
                         self._device_name,
@@ -540,7 +544,7 @@ class PhantomDeviceTotalCostSensor(PhantomDeviceSensor, RestoreEntity):
             self._last_meter_value = new_meter_value
             self._attr_available = True
             # Ensure native value is set to current total cost
-            self._attr_native_value = round(self._total_cost, 3)
+            self._attr_native_value = self._total_cost
             
         except (ValueError, TypeError) as err:
             _LOGGER.warning("Error calculating cost for %s: %s", self._device_name, err)
@@ -585,6 +589,7 @@ class PhantomGroupTotalCostSensor(PhantomBaseSensor, RestoreEntity):
     
     _attr_device_class = None
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_suggested_display_precision = 2
     _attr_icon = "mdi:cash-multiple"
     
     def __init__(
@@ -700,7 +705,7 @@ class PhantomGroupTotalCostSensor(PhantomBaseSensor, RestoreEntity):
             self._attr_native_value = None
         else:
             self._attr_available = True
-            self._attr_native_value = round(total, 3)
+            self._attr_native_value = total
     
     async def async_reset(self) -> None:
         """Reset the group total cost.
