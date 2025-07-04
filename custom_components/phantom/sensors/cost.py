@@ -27,7 +27,7 @@ from ..tariff_external import ExternalTariffManager
 _LOGGER = logging.getLogger(__name__)
 
 # Force update interval to ensure graphs stay smooth and responsive
-COST_SENSOR_UPDATE_INTERVAL = timedelta(seconds=30)
+COST_SENSOR_UPDATE_INTERVAL = timedelta(seconds=10)
 
 
 class PhantomDeviceHourlyCostSensor(PhantomDeviceSensor):
@@ -90,7 +90,7 @@ class PhantomDeviceHourlyCostSensor(PhantomDeviceSensor):
             async_track_time_interval(
                 self.hass,
                 self._handle_time_update,
-                timedelta(minutes=1)
+                timedelta(seconds=30)
             )
         )
     
@@ -193,7 +193,7 @@ class PhantomGroupHourlyCostSensor(PhantomBaseSensor):
             async_track_time_interval(
                 self.hass,
                 self._handle_time_update,
-                timedelta(minutes=1)
+                timedelta(seconds=30)
             )
         )
     
@@ -289,7 +289,7 @@ class PhantomTouRateSensor(PhantomBaseSensor):
             async_track_time_interval(
                 self.hass,
                 self._handle_time_update,
-                timedelta(minutes=1)
+                timedelta(seconds=30)
             )
         )
     
