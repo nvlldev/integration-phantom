@@ -165,14 +165,20 @@ class PhantomEnergyBasedCostRemainderSensor(PhantomBaseSensor, RestoreEntity):
                     # Get current tariff rate
                     current_rate = self._tariff_manager.get_current_rate()
                     
-                    # Calculate cost of the energy delta
-                    cost_delta = self._tariff_manager.calculate_energy_cost(
-                        abs(energy_delta), 
-                        current_rate
-                    )
-                    
-                    # Add to accumulated cost
-                    self._accumulated_cost += cost_delta
+                    # Only accumulate cost when remainder increases (more unaccounted energy)
+                    if energy_delta > 0:
+                        # Calculate cost of the energy delta
+                        cost_delta = self._tariff_manager.calculate_energy_cost(
+                            energy_delta, 
+                            current_rate
+                        )
+                        
+                        # Add to accumulated cost
+                        self._accumulated_cost += cost_delta
+                    else:
+                        # Energy remainder decreased - devices caught up
+                        # Don't add cost (could optionally subtract, but that would make it TOTAL not TOTAL_INCREASING)
+                        cost_delta = 0
                     
                     _LOGGER.debug(
                         "Cost remainder '%s' - energy delta: %.3f kWh @ %.3f %s/kWh = %.2f %s (total: %.2f %s)",
