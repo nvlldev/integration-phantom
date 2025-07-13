@@ -18,6 +18,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant, callback, Event
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .base import PhantomBaseSensor
 from ..const import CONF_DEVICE_ID, DOMAIN
