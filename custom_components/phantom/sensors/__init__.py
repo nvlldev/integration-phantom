@@ -12,7 +12,7 @@ from .cost import (
     PhantomDeviceTotalCostSensor,
     PhantomGroupTotalCostSensor,
 )
-from .remainder_cost import PhantomCostRemainderSensor
+from .remainder_cost_energy_based import PhantomEnergyBasedCostRemainderSensor
 
 __all__ = [
     "PhantomPowerSensor",
@@ -29,5 +29,5 @@ __all__ = [
     "PhantomTouRateSensor",
     "PhantomDeviceTotalCostSensor",
     "PhantomGroupTotalCostSensor",
-    "PhantomCostRemainderSensor",
+    "PhantomEnergyBasedCostRemainderSensor",
 ]

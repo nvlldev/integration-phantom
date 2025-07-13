@@ -46,7 +46,7 @@ from .sensors import (
     PhantomDeviceTotalCostSensor,
     PhantomGroupTotalCostSensor,
 )
-from .sensors.remainder_cost import PhantomCostRemainderSensor
+from .sensors.remainder_cost_energy_based import PhantomEnergyBasedCostRemainderSensor
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -499,50 +499,37 @@ async def _create_group_sensors(
                             upstream_meter_entity
                         )
                         
-                        # Now create cost remainder sensor that tracks upstream cost vs group total cost
-                        # We need to find the group total cost entity
-                        group_total_cost_entity = None
-                        expected_group_cost_id = f"{group_id}_total_cost" if group_id else f"{config_entry.entry_id}_{sanitize_name(group_name)}_total_cost"
-                        
-                        for entity_id, entry in entity_registry.entities.items():
-                            if (entry.unique_id == expected_group_cost_id and 
-                                entry.domain == "sensor" and
-                                entry.platform == DOMAIN):
-                                group_total_cost_entity = entity_id
-                                _LOGGER.debug("Found group total cost entity: %s", group_total_cost_entity)
-                                break
-                        
-                        if group_total_cost_entity:
-                            # Get upstream cost entity
-                            upstream_cost_entity = None
-                            expected_upstream_cost_id = f"{group_id}_upstream_cost" if group_id else f"{config_entry.entry_id}_{sanitize_name(group_name)}_upstream_cost"
+                        # Create cost remainder sensor if we have an energy remainder sensor
+                        # Find energy remainder entity
+                        energy_remainder_entity = None
+                        if upstream_energy_entity and energy_entities:
+                            # Get from stored mappings
+                            expected_energy_remainder_id = mappings["energy_remainder"]
                             
                             for entity_id, entry in entity_registry.entities.items():
-                                if (entry.unique_id == expected_upstream_cost_id and 
+                                if (entry.unique_id == expected_energy_remainder_id and 
                                     entry.domain == "sensor" and
                                     entry.platform == DOMAIN):
-                                    upstream_cost_entity = entity_id
-                                    _LOGGER.debug("Found upstream cost entity: %s", upstream_cost_entity)
+                                    energy_remainder_entity = entity_id
+                                    _LOGGER.debug("Found energy remainder entity: %s", energy_remainder_entity)
                                     break
-                            
-                            if upstream_cost_entity:
-                                cost_remainder_sensor = PhantomCostRemainderSensor(
-                                    hass,
-                                    config_entry.entry_id,
-                                    group_name,
-                                    group_id,
-                                    upstream_cost_entity,
-                                    group_total_cost_entity,
-                                    tariff_manager,
-                                )
-                                async_add_entities([cost_remainder_sensor])
-                                _register_entity_for_reset(hass, config_entry.entry_id, cost_remainder_sensor)
-                                _LOGGER.info(
-                                    "Created cost remainder sensor for group '%s' (upstream: %s, total: %s)",
-                                    group_name,
-                                    upstream_cost_entity,
-                                    group_total_cost_entity
-                                )
+                        
+                        if energy_remainder_entity:
+                            cost_remainder_sensor = PhantomEnergyBasedCostRemainderSensor(
+                                hass,
+                                config_entry.entry_id,
+                                group_name,
+                                group_id,
+                                energy_remainder_entity,
+                                tariff_manager,
+                            )
+                            async_add_entities([cost_remainder_sensor])
+                            _register_entity_for_reset(hass, config_entry.entry_id, cost_remainder_sensor)
+                            _LOGGER.info(
+                                "Created cost remainder sensor for group '%s' tracking energy remainder %s",
+                                group_name,
+                                energy_remainder_entity
+                            )
             else:
                 _LOGGER.warning(
                     "No total cost sensors created for group '%s' - no utility meters found",
