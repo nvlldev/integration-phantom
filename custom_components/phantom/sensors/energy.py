@@ -208,6 +208,11 @@ class PhantomEnergySensor(PhantomBaseSensor, RestoreEntity):
                     self._group_name
                 )
                 self._issue_created = False
+    
+    async def async_reset(self) -> None:
+        """Reset is not supported for group total energy sensor."""
+        _LOGGER.info("Reset not supported for group energy total sensor '%s'", self._group_name)
+        # Group total is calculated from device meters - reset individual device meters instead
 
 
 class PhantomUtilityMeterSensor(PhantomDeviceSensor, RestoreEntity):

@@ -523,17 +523,23 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor, RestoreEntity):
                 # Calculate the remainder delta
                 remainder_delta = upstream_delta - total_delta
                 
-                # Add to accumulated remainder
-                self._accumulated_remainder += remainder_delta
-                
-                _LOGGER.debug(
-                    "Energy remainder '%s' - upstream delta: %.3f, total delta: %.3f, remainder delta: %.3f, accumulated: %.3f",
-                    self._group_name,
-                    upstream_delta,
-                    total_delta,
-                    remainder_delta,
-                    self._accumulated_remainder,
-                )
+                # Only accumulate positive remainder (unaccounted energy)
+                if remainder_delta > 0:
+                    self._accumulated_remainder += remainder_delta
+                    _LOGGER.debug(
+                        "Energy remainder '%s' - upstream delta: %.3f, total delta: %.3f, remainder delta: %.3f, accumulated: %.3f",
+                        self._group_name,
+                        upstream_delta,
+                        total_delta,
+                        remainder_delta,
+                        self._accumulated_remainder,
+                    )
+                else:
+                    _LOGGER.debug(
+                        "Energy remainder '%s' - devices caught up, not accumulating negative remainder: %.3f",
+                        self._group_name,
+                        remainder_delta,
+                    )
             elif upstream_delta < -0.000001 or total_delta < -0.000001:
                 # Handle meter resets - just log it, don't accumulate negative deltas
                 _LOGGER.info(

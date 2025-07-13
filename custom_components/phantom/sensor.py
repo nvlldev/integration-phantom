@@ -27,6 +27,7 @@ from .const import (
 from .state_migration import clear_migration_data
 from .tariff import TariffManager
 from .tariff_external import ExternalTariffManager
+from .utils import sanitize_name
 
 # Import all sensor types from the sensors package
 from .sensors import (
@@ -48,6 +49,18 @@ from .sensors import (
 from .sensors.remainder_cost_energy_based import PhantomEnergyBasedCostRemainderSensor
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _register_entity_for_reset(hass: HomeAssistant, config_entry_id: str, entity: SensorEntity) -> None:
+    """Register an entity for reset functionality."""
+    if hasattr(entity, "_group_name") and hasattr(entity, "async_reset"):
+        group_name = entity._group_name
+        if "entities_by_group" not in hass.data[DOMAIN][config_entry_id]:
+            hass.data[DOMAIN][config_entry_id]["entities_by_group"] = {}
+        if group_name not in hass.data[DOMAIN][config_entry_id]["entities_by_group"]:
+            hass.data[DOMAIN][config_entry_id]["entities_by_group"][group_name] = []
+        hass.data[DOMAIN][config_entry_id]["entities_by_group"][group_name].append(entity)
+        _LOGGER.debug("Registered %s for reset in group '%s'", type(entity).__name__, group_name)
 
 
 async def async_setup_entry(
@@ -111,11 +124,7 @@ async def async_setup_entry(
         
         # Group entities by their group name
         for entity in entities:
-            if hasattr(entity, "_group_name") and hasattr(entity, "async_reset"):
-                group_name = entity._group_name
-                if group_name not in hass.data[DOMAIN][config_entry.entry_id]["entities_by_group"]:
-                    hass.data[DOMAIN][config_entry.entry_id]["entities_by_group"][group_name] = []
-                hass.data[DOMAIN][config_entry.entry_id]["entities_by_group"][group_name].append(entity)
+            _register_entity_for_reset(hass, config_entry.entry_id, entity)
         
         # Schedule clearing migration data after entities have been initialized
         async def clear_migration_after_delay():
@@ -354,6 +363,24 @@ async def _create_group_sensors(
             )
             _LOGGER.debug("Created energy remainder sensor for group '%s'", group_name)
     
+    # Store utility meter mapping for cost sensors
+    utility_meter_mapping = {}
+    for device in devices:
+        device_id = device.get(CONF_DEVICE_ID)
+        if device_id:
+            utility_meter_mapping[device_id] = f"{device_id}_utility_meter"
+    
+    # Store sensor mappings for delayed sensors
+    if "sensor_mappings" not in hass.data[DOMAIN][config_entry.entry_id]:
+        hass.data[DOMAIN][config_entry.entry_id]["sensor_mappings"] = {}
+    
+    mappings = hass.data[DOMAIN][config_entry.entry_id]["sensor_mappings"]
+    mappings[group_name] = {
+        "upstream_meter": f"{group_id}_upstream_energy_meter" if group_id else f"{config_entry.entry_id}_{sanitize_name(group_name)}_upstream_energy_meter",
+        "energy_remainder": f"{group_id}_energy_remainder" if group_id else f"{config_entry.entry_id}_{sanitize_name(group_name)}_energy_remainder",
+        "utility_meters": utility_meter_mapping,
+    }
+    
     # Create delayed total cost sensors if tariff is enabled
     if tariff_manager.enabled:
         # Schedule creation of total cost sensors after utility meters are ready
@@ -361,39 +388,30 @@ async def _create_group_sensors(
             """Create total cost sensors with retry logic."""
             _LOGGER.info("Starting delayed creation of total cost sensors for group '%s'", group_name)
             
-            max_attempts = 6
-            base_delay = 2
+            # Get stored mappings
+            mappings = hass.data[DOMAIN][config_entry.entry_id]["sensor_mappings"][group_name]
             
-            for attempt in range(max_attempts):
-                delay = base_delay * (1.5 ** attempt)  # 2, 3, 4.5, 6.75, 10.1, 15.2 seconds
-                await asyncio.sleep(delay)
+            # Single short delay to allow entities to be registered
+            await asyncio.sleep(1.0)
+            
+            _LOGGER.info("Creating total cost sensors for group '%s' after 1s delay", group_name)
+            
+            entity_registry = er.async_get(hass)
+            cost_entities = []
+            devices_to_process = []
+            
+            for device in devices:
+                device_name = device.get("name", "Unknown")
+                device_id = device.get(CONF_DEVICE_ID)
                 
-                _LOGGER.info("Attempt %d/%d: Creating total cost sensors for group '%s' after %.1fs delay", 
-                           attempt + 1, max_attempts, group_name, delay)
-                
-                entity_registry = er.async_get(hass)
-                cost_entities = []
-                devices_to_process = []
-                
-                # Debug: Log available phantom entities
-                phantom_entities = [
-                    f"{entity_id} (unique_id: {entry.unique_id})" 
-                    for entity_id, entry in entity_registry.entities.items() 
-                    if entry.platform == DOMAIN and entry.domain == "sensor"
-                ]
-                _LOGGER.debug("Available phantom sensor entities: %s", phantom_entities)
-                
-                for device in devices:
-                    device_name = device.get("name", "Unknown")
-                    device_id = device.get(CONF_DEVICE_ID)
+                if device_id and device.get("energy_entity"):
+                    devices_to_process.append((device_name, device_id))
                     
-                    if device_id and device.get("energy_entity"):
-                        devices_to_process.append((device_name, device_id))
-                        
-                        # Find the utility meter entity for this device
-                        expected_unique_id = f"{device_id}_utility_meter"
-                        utility_meter_entity = None
-                        
+                    # Get the utility meter entity from mappings
+                    expected_unique_id = mappings["utility_meters"].get(device_id)
+                    utility_meter_entity = None
+                    
+                    if expected_unique_id:
                         _LOGGER.debug("Looking for utility meter with unique_id: %s", expected_unique_id)
                         
                         for entity_id, entry in entity_registry.entities.items():
@@ -404,64 +422,56 @@ async def _create_group_sensors(
                             ):
                                 utility_meter_entity = entity_id
                                 break
+                    
+                    if utility_meter_entity:
+                        # Verify entity has a valid state
+                        state = hass.states.get(utility_meter_entity)
+                        if state is None:
+                            _LOGGER.warning(
+                                "Utility meter %s found in registry but not in state machine",
+                                utility_meter_entity
+                            )
+                            continue
                         
-                        if utility_meter_entity:
-                            # Verify entity has a valid state
-                            state = hass.states.get(utility_meter_entity)
-                            if state is None:
-                                _LOGGER.warning(
-                                    "Utility meter %s found in registry but not in state machine (attempt %d/%d)",
-                                    utility_meter_entity, attempt + 1, max_attempts
-                                )
-                                continue
-                            
-                            # Create total cost sensor
-                            cost_sensor = PhantomDeviceTotalCostSensor(
-                                hass,
-                                config_entry.entry_id,
-                                group_name,
-                                device_name,
-                                device_id,
-                                utility_meter_entity,
-                                tariff_manager,
-                            )
-                            cost_entities.append(cost_sensor)
-                            _LOGGER.info(
-                                "Created delayed total cost sensor for device '%s' tracking %s (state: %s)",
-                                device_name,
-                                utility_meter_entity,
-                                state.state
-                            )
-                        else:
-                            _LOGGER.debug(
-                                "Could not find utility meter entity for device '%s' with ID %s (attempt %d/%d)",
-                                device_name,
-                                device_id,
-                                attempt + 1,
-                                max_attempts
-                            )
+                        # Create total cost sensor
+                        cost_sensor = PhantomDeviceTotalCostSensor(
+                            hass,
+                            config_entry.entry_id,
+                            group_name,
+                            device_name,
+                            device_id,
+                            utility_meter_entity,
+                            tariff_manager,
+                        )
+                        cost_entities.append(cost_sensor)
+                        _LOGGER.info(
+                            "Created delayed total cost sensor for device '%s' tracking %s (state: %s)",
+                            device_name,
+                            utility_meter_entity,
+                            state.state
+                        )
+                    else:
+                        _LOGGER.debug(
+                            "Could not find utility meter entity for device '%s' with ID %s",
+                            device_name,
+                            device_id
+                        )
                 
-                # If we found all expected utility meters, break
-                if len(cost_entities) == len(devices_to_process):
-                    _LOGGER.info("Found all %d expected utility meters on attempt %d", len(cost_entities), attempt + 1)
-                    break
-                elif cost_entities:
-                    _LOGGER.info("Found %d/%d utility meters on attempt %d, continuing...", 
-                               len(cost_entities), len(devices_to_process), attempt + 1)
-                else:
-                    _LOGGER.warning("Found 0/%d utility meters on attempt %d", len(devices_to_process), attempt + 1)
             
             # Add the cost sensors
             if cost_entities:
                 async_add_entities(cost_entities)
+                # Register each cost entity for reset
+                for cost_entity in cost_entities:
+                    _register_entity_for_reset(hass, config_entry.entry_id, cost_entity)
                 _LOGGER.info("Added %d delayed total cost sensors for group '%s'", len(cost_entities), group_name)
                 
                 # Create cost remainder sensor if we have an energy remainder sensor
                 # Find energy remainder entity
                 energy_remainder_entity = None
                 if upstream_energy_entity and energy_entities:
-                    # Look for energy remainder sensor
-                    expected_energy_remainder_id = f"{group_id}_energy_remainder" if group_id else f"{config_entry.entry_id}_{group_name.lower().replace(' ', '_')}_energy_remainder"
+                    # Get from stored mappings
+                    expected_energy_remainder_id = mappings["energy_remainder"]
                     
                     for entity_id, entry in entity_registry.entities.items():
                         if (entry.unique_id == expected_energy_remainder_id and 
@@ -481,6 +491,7 @@ async def _create_group_sensors(
                         tariff_manager,
                     )
                     async_add_entities([cost_remainder_sensor])
+                    _register_entity_for_reset(hass, config_entry.entry_id, cost_remainder_sensor)
                     _LOGGER.info(
                         "Created cost remainder sensor for group '%s' tracking energy remainder %s",
                         group_name,
@@ -489,9 +500,9 @@ async def _create_group_sensors(
                 
                 # Create upstream cost sensor if we have an upstream energy meter
                 if upstream_energy_entity:
-                    # Find upstream meter entity
+                    # Get from stored mappings
                     upstream_meter_entity = None
-                    expected_upstream_meter_id = f"{group_id}_upstream_energy_meter" if group_id else f"{config_entry.entry_id}_{group_name.lower().replace(' ', '_')}_upstream_energy_meter"
+                    expected_upstream_meter_id = mappings["upstream_meter"]
                     
                     for entity_id, entry in entity_registry.entities.items():
                         if (entry.unique_id == expected_upstream_meter_id and 
@@ -511,15 +522,16 @@ async def _create_group_sensors(
                             tariff_manager,
                         )
                         async_add_entities([upstream_cost_sensor])
+                        _register_entity_for_reset(hass, config_entry.entry_id, upstream_cost_sensor)
                         _LOGGER.info(
                             "Created upstream cost sensor for group '%s' tracking upstream meter %s",
                             group_name,
                             upstream_meter_entity
                         )
             else:
-                _LOGGER.error(
-                    "No total cost sensors created for group '%s' after %d attempts - no utility meters found",
-                    group_name, max_attempts
+                _LOGGER.warning(
+                    "No total cost sensors created for group '%s' - no utility meters found",
+                    group_name
                 )
         
         # Store the task reference for the create function
