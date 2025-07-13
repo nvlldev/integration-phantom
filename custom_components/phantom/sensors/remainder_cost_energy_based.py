@@ -20,10 +20,10 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class PhantomEnergyBasedCostRemainderSensor(PhantomBaseSensor, RestoreEntity):
-    """Sensor for cost of energy remainder."""
+    """Sensor for accumulated cost of energy remainder changes (works like a utility meter)."""
     
     _attr_device_class = None
-    _attr_state_class = SensorStateClass.TOTAL
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_suggested_display_precision = 2
     _attr_icon = "mdi:cash-minus"
     
@@ -44,6 +44,8 @@ class PhantomEnergyBasedCostRemainderSensor(PhantomBaseSensor, RestoreEntity):
         self._attr_name = "Cost Remainder"
         self._attr_native_unit_of_measurement = tariff_manager.currency
         self._currency_symbol = tariff_manager.currency_symbol
+        self._last_energy_remainder = None
+        self._accumulated_cost = 0.0
         
     @property
     def extra_state_attributes(self):
@@ -51,16 +53,23 @@ class PhantomEnergyBasedCostRemainderSensor(PhantomBaseSensor, RestoreEntity):
         attrs = {
             "currency_symbol": self._currency_symbol,
             "current_rate": self._tariff_manager.get_current_rate(),
+            "current_period": self._tariff_manager.get_current_period(),
         }
         if self._energy_remainder_entity:
             attrs["energy_remainder_entity"] = self._energy_remainder_entity
+            if self._last_energy_remainder is not None:
+                attrs["last_energy_remainder"] = self._last_energy_remainder
             
-            # Get energy remainder value for additional context
+            # Get current energy remainder value for additional context
             energy_state = self.hass.states.get(self._energy_remainder_entity)
             if energy_state and energy_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
                 try:
                     energy_value = float(energy_state.state)
-                    attrs["energy_remainder_kwh"] = energy_value
+                    attrs["current_energy_remainder_kwh"] = energy_value
+                    # Calculate instantaneous cost value
+                    if "instantaneous_remainder" in energy_state.attributes:
+                        instant_remainder = float(energy_state.attributes["instantaneous_remainder"])
+                        attrs["instantaneous_cost"] = instant_remainder * self._tariff_manager.get_current_rate()
                 except (ValueError, TypeError):
                     pass
         else:
@@ -75,10 +84,27 @@ class PhantomEnergyBasedCostRemainderSensor(PhantomBaseSensor, RestoreEntity):
         if (last_state := await self.async_get_last_state()) is not None:
             if last_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
                 try:
-                    self._attr_native_value = float(last_state.state)
+                    # Always restore the value, regardless of sensor version
+                    self._accumulated_cost = float(last_state.state)
+                    self._attr_native_value = self._accumulated_cost
                     self._attr_available = True
+                    
+                    # Try to restore last energy remainder if it exists
+                    if "last_energy_remainder" in last_state.attributes:
+                        self._last_energy_remainder = float(last_state.attributes["last_energy_remainder"])
+                    
+                    _LOGGER.info(
+                        "Restored cost remainder: %s %s (last energy: %s kWh)",
+                        self._accumulated_cost,
+                        self._currency_symbol,
+                        self._last_energy_remainder if self._last_energy_remainder is not None else "None"
+                    )
                 except (ValueError, TypeError):
-                    pass
+                    self._accumulated_cost = 0.0
+                    self._attr_native_value = 0.0
+        else:
+            self._accumulated_cost = 0.0
+            self._attr_native_value = 0.0
         
         # Track energy remainder entity
         if self._energy_remainder_entity:
@@ -108,7 +134,7 @@ class PhantomEnergyBasedCostRemainderSensor(PhantomBaseSensor, RestoreEntity):
         if not self._energy_remainder_entity:
             # No energy remainder entity configured
             self._attr_available = False
-            self._attr_native_value = None
+            self._attr_native_value = self._accumulated_cost
             _LOGGER.debug(
                 "Cost remainder '%s' unavailable - no energy remainder entity configured",
                 self._group_name,
@@ -128,34 +154,42 @@ class PhantomEnergyBasedCostRemainderSensor(PhantomBaseSensor, RestoreEntity):
             return
         
         try:
-            energy_remainder_kwh = float(energy_state.state)
+            current_energy_remainder = float(energy_state.state)
             
-            # Get current tariff rate
-            current_rate = self._tariff_manager.get_current_rate()
+            # Calculate delta if we have a previous value
+            if self._last_energy_remainder is not None:
+                energy_delta = current_energy_remainder - self._last_energy_remainder
+                
+                # Only process if there's actual change
+                if abs(energy_delta) > 0.000001:
+                    # Get current tariff rate
+                    current_rate = self._tariff_manager.get_current_rate()
+                    
+                    # Calculate cost of the energy delta
+                    cost_delta = self._tariff_manager.calculate_energy_cost(
+                        abs(energy_delta), 
+                        current_rate
+                    )
+                    
+                    # Add to accumulated cost
+                    self._accumulated_cost += cost_delta
+                    
+                    _LOGGER.debug(
+                        "Cost remainder '%s' - energy delta: %.3f kWh @ %.3f %s/kWh = %.2f %s (total: %.2f %s)",
+                        self._group_name,
+                        energy_delta,
+                        current_rate,
+                        self._currency_symbol,
+                        cost_delta,
+                        self._currency_symbol,
+                        self._accumulated_cost,
+                        self._currency_symbol,
+                    )
             
-            # Calculate cost of energy remainder
-            # Energy remainder can be negative (when devices use more than upstream)
-            cost_remainder = self._tariff_manager.calculate_energy_cost(
-                abs(energy_remainder_kwh), 
-                current_rate
-            )
-            
-            # Preserve the sign - if energy remainder is negative, cost should be negative
-            if energy_remainder_kwh < 0:
-                cost_remainder = -cost_remainder
-            
-            self._attr_native_value = cost_remainder
+            # Update tracking values
+            self._last_energy_remainder = current_energy_remainder
+            self._attr_native_value = self._accumulated_cost
             self._attr_available = True
-            
-            _LOGGER.debug(
-                "Cost remainder '%s' calculated: %.3f kWh @ %.3f %s/kWh = %.2f %s",
-                self._group_name,
-                energy_remainder_kwh,
-                current_rate,
-                self._currency_symbol,
-                cost_remainder,
-                self._tariff_manager.currency,
-            )
             
         except (ValueError, TypeError) as err:
             _LOGGER.warning(
@@ -164,4 +198,11 @@ class PhantomEnergyBasedCostRemainderSensor(PhantomBaseSensor, RestoreEntity):
                 err,
                 energy_state.state,
             )
-            self._attr_available = False
+    
+    async def async_reset(self) -> None:
+        """Reset the cost remainder accumulator."""
+        _LOGGER.info("Resetting cost remainder for group '%s'", self._group_name)
+        self._accumulated_cost = 0.0
+        self._attr_native_value = 0.0
+        # Keep the last energy remainder to continue tracking from current state
+        self.async_write_ha_state()
