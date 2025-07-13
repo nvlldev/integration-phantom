@@ -18,7 +18,6 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant, callback, Event
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.restore_state import RestoreEntity
 
 from .base import PhantomBaseSensor
 from ..const import CONF_DEVICE_ID, DOMAIN
@@ -183,12 +182,12 @@ class PhantomPowerRemainderSensor(PhantomBaseSensor, RestoreEntity):
                 self._devices_issue_created = False
 
 
-class PhantomEnergyRemainderSensor(PhantomBaseSensor, RestoreEntity):
-    """Sensor for accumulated energy remainder (works like a utility meter)."""
+class PhantomEnergyRemainderSensor(PhantomBaseSensor):
+    """Sensor showing instantaneous energy remainder (upstream - total)."""
     
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_suggested_display_precision = 3
     _attr_icon = "mdi:lightning-bolt-outline"
     
@@ -212,9 +211,6 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor, RestoreEntity):
         self._setup_delayed = False
         self._upstream_issue_created = False
         self._devices_issue_created = False
-        self._last_upstream_value = None
-        self._last_total_value = None
-        self._accumulated_remainder = 0.0
     
     @property
     def extra_state_attributes(self):
@@ -223,46 +219,34 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor, RestoreEntity):
             "upstream_meter": self._upstream_meter_entity,
             "device_count": len(self._utility_meter_entities),
         }
-        if self._last_upstream_value is not None and self._last_total_value is not None:
-            attrs["instantaneous_remainder"] = self._last_upstream_value - self._last_total_value
-        if self._last_upstream_value is not None:
-            attrs["last_upstream_value"] = self._last_upstream_value
-        if self._last_total_value is not None:
-            attrs["last_total_value"] = self._last_total_value
+        
+        # Get current values to show in attributes
+        if self._upstream_meter_entity:
+            upstream_state = self.hass.states.get(self._upstream_meter_entity)
+            if upstream_state and upstream_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                try:
+                    attrs["upstream_energy"] = float(upstream_state.state)
+                except (ValueError, TypeError):
+                    pass
+        
+        # Calculate total from utility meters
+        total = 0
+        for entity_id in self._utility_meter_entities:
+            state = self.hass.states.get(entity_id)
+            if state and state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                try:
+                    total += float(state.state)
+                except (ValueError, TypeError):
+                    pass
+        attrs["total_device_energy"] = total
+        
         return attrs
     
     async def async_added_to_hass(self) -> None:
         """Handle entity added to hass."""
         await super().async_added_to_hass()
         
-        # Restore previous state if available
-        if (last_state := await self.async_get_last_state()) is not None:
-            if last_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-                try:
-                    # Always restore the value, regardless of sensor version
-                    self._accumulated_remainder = float(last_state.state)
-                    self._attr_native_value = self._accumulated_remainder
-                    self._attr_available = True
-                    
-                    # Try to restore tracking values if they exist
-                    if "last_upstream_value" in last_state.attributes:
-                        self._last_upstream_value = float(last_state.attributes["last_upstream_value"])
-                    if "last_total_value" in last_state.attributes:
-                        self._last_total_value = float(last_state.attributes["last_total_value"])
-                    
-                    _LOGGER.info(
-                        "Restored energy remainder for '%s': %.3f kWh (upstream: %s, total: %s)",
-                        self._group_name,
-                        self._accumulated_remainder,
-                        self._last_upstream_value if self._last_upstream_value is not None else "None",
-                        self._last_total_value if self._last_total_value is not None else "None"
-                    )
-                except (ValueError, TypeError):
-                    self._accumulated_remainder = 0.0
-                    self._attr_native_value = 0.0
-        else:
-            self._accumulated_remainder = 0.0
-            self._attr_native_value = 0.0
+        # No restoration needed for instantaneous sensor
         
         # Delay setup to allow meters to be created
         self.hass.async_create_task(self._delayed_setup())
@@ -512,55 +496,20 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor, RestoreEntity):
                 )
                 self._devices_issue_created = False
         
-        # Now we have both upstream and total values
-        # Calculate deltas if we have previous values
-        if self._last_upstream_value is not None and self._last_total_value is not None:
-            upstream_delta = upstream_value - self._last_upstream_value
-            total_delta = total - self._last_total_value
-            
-            # Only process if there's actual consumption
-            if upstream_delta > 0.000001 or total_delta > 0.000001:
-                # Calculate the remainder delta
-                remainder_delta = upstream_delta - total_delta
-                
-                # Only accumulate positive remainder (unaccounted energy)
-                if remainder_delta > 0:
-                    self._accumulated_remainder += remainder_delta
-                    _LOGGER.debug(
-                        "Energy remainder '%s' - upstream delta: %.3f, total delta: %.3f, remainder delta: %.3f, accumulated: %.3f",
-                        self._group_name,
-                        upstream_delta,
-                        total_delta,
-                        remainder_delta,
-                        self._accumulated_remainder,
-                    )
-                else:
-                    _LOGGER.debug(
-                        "Energy remainder '%s' - devices caught up, not accumulating negative remainder: %.3f",
-                        self._group_name,
-                        remainder_delta,
-                    )
-            elif upstream_delta < -0.000001 or total_delta < -0.000001:
-                # Handle meter resets - just log it, don't accumulate negative deltas
-                _LOGGER.info(
-                    "Energy remainder '%s' - meter reset detected (upstream: %.3f->%.3f, total: %.3f->%.3f)",
-                    self._group_name,
-                    self._last_upstream_value,
-                    upstream_value,
-                    self._last_total_value,
-                    total,
-                )
+        # Calculate instantaneous remainder (upstream - total)
+        remainder = upstream_value - total
         
-        # Update tracking values
-        self._last_upstream_value = upstream_value
-        self._last_total_value = total
-        self._attr_native_value = self._accumulated_remainder
+        self._attr_native_value = remainder
         self._attr_available = True
+        
+        _LOGGER.debug(
+            "Energy remainder '%s' = upstream %.3f - total %.3f = %.3f kWh",
+            self._group_name,
+            upstream_value,
+            total,
+            remainder,
+        )
     
     async def async_reset(self) -> None:
-        """Reset the energy remainder accumulator."""
-        _LOGGER.info("Resetting energy remainder for group '%s'", self._group_name)
-        self._accumulated_remainder = 0.0
-        self._attr_native_value = 0.0
-        # Keep the last values to continue tracking from current state
-        self.async_write_ha_state()
+        """Reset not applicable for instantaneous sensor."""
+        _LOGGER.info("Reset not applicable for instantaneous energy remainder sensor '%s'", self._group_name)
