@@ -188,7 +188,7 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor, RestoreEntity):
     
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_state_class = SensorStateClass.TOTAL
     _attr_suggested_display_precision = 3
     _attr_icon = "mdi:lightning-bolt-outline"
     
@@ -465,8 +465,8 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor, RestoreEntity):
         else:
             self._attr_available = True
             remainder = upstream_value - total
-            # Energy remainder should not go negative
-            self._attr_native_value = max(0, remainder)
+            # Energy remainder can be negative when devices consume more than upstream
+            self._attr_native_value = remainder
             _LOGGER.debug(
                 "Energy remainder '%s' - calculated: %s - %s = %s",
                 self._group_name,

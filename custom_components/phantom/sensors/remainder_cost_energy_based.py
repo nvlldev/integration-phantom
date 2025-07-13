@@ -23,7 +23,7 @@ class PhantomEnergyBasedCostRemainderSensor(PhantomBaseSensor, RestoreEntity):
     """Sensor for cost of energy remainder."""
     
     _attr_device_class = None
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL
     _attr_suggested_display_precision = 2
     _attr_icon = "mdi:cash-minus"
     
