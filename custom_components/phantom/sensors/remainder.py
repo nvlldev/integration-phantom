@@ -15,23 +15,31 @@ from homeassistant.const import (
     UnitOfEnergy,
     UnitOfPower,
 )
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant, callback, Event
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .base import PhantomBaseSensor
 from ..const import CONF_DEVICE_ID, DOMAIN
 from ..utils import sanitize_name
+from ..repairs import (
+    async_create_sensor_unavailable_issue,
+    async_delete_sensor_unavailable_issue,
+    async_create_upstream_unavailable_issue,
+    async_delete_upstream_unavailable_issue,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class PhantomPowerRemainderSensor(PhantomBaseSensor):
+class PhantomPowerRemainderSensor(PhantomBaseSensor, RestoreEntity):
     """Sensor for power remainder (upstream - total)."""
     
     _attr_device_class = SensorDeviceClass.POWER
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 1
     _attr_icon = "mdi:flash-outline"
     
     def __init__(
@@ -47,9 +55,22 @@ class PhantomPowerRemainderSensor(PhantomBaseSensor):
         self._upstream_entity = upstream_entity
         self._power_entities = power_entities
         self._attr_name = "Power Remainder"
+        self._upstream_issue_created = False
+        self._devices_issue_created = False
     
     async def async_added_to_hass(self) -> None:
         """Handle entity added to hass."""
+        await super().async_added_to_hass()
+        
+        # Restore previous state if available
+        if (last_state := await self.async_get_last_state()) is not None:
+            if last_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                try:
+                    self._attr_native_value = float(last_state.state)
+                    self._attr_available = True
+                except (ValueError, TypeError):
+                    pass
+        
         all_entities = [self._upstream_entity] + self._power_entities
         self.async_on_remove(
             async_track_state_change_event(
@@ -58,38 +79,68 @@ class PhantomPowerRemainderSensor(PhantomBaseSensor):
                 self._handle_state_change,
             )
         )
+        
+        # Do initial update
         self._update_state()
     
     @callback
-    def _handle_state_change(self, event) -> None:
+    def _handle_state_change(self, event: Event) -> None:
         """Handle state changes of tracked entities."""
-        self._update_state()
-        self.async_write_ha_state()
+        # Only update if the new state is valid
+        new_state = event.data.get("new_state")
+        if new_state is not None:
+            self._update_state()
+            self.async_write_ha_state()
     
     @callback
     def _update_state(self) -> None:
         """Update the sensor state."""
         # Get upstream value
         upstream_state = self.hass.states.get(self._upstream_entity)
-        if upstream_state is None or upstream_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-            self._attr_available = False
-            self._attr_native_value = None
-            return
+        upstream_available = True
+        upstream_value = None
         
-        try:
-            upstream_value = float(upstream_state.state)
-        except (ValueError, TypeError):
-            self._attr_available = False
-            self._attr_native_value = None
+        if upstream_state is None or upstream_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            upstream_available = False
+            
+            # Create upstream unavailable issue if not already created
+            if not self._upstream_issue_created:
+                async_create_upstream_unavailable_issue(
+                    self.hass,
+                    self._group_name,
+                    self._upstream_entity
+                )
+                self._upstream_issue_created = True
+        else:
+            try:
+                upstream_value = float(upstream_state.state)
+                
+                # Delete upstream issue if it was created
+                if self._upstream_issue_created:
+                    async_delete_upstream_unavailable_issue(
+                        self.hass,
+                        self._group_name
+                    )
+                    self._upstream_issue_created = False
+            except (ValueError, TypeError):
+                upstream_available = False
+        
+        if not upstream_available:
+            # Don't update if upstream is not available yet
+            # Keep previous state during restart
+            if not self._attr_available:
+                self._attr_native_value = 0.0
             return
         
         # Calculate total from power entities
         total = 0
         any_available = False
+        unavailable_entities = []
         
         for entity_id in self._power_entities:
             state = self.hass.states.get(entity_id)
             if state is None:
+                unavailable_entities.append(entity_id)
                 continue
                 
             if state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
@@ -98,21 +149,47 @@ class PhantomPowerRemainderSensor(PhantomBaseSensor):
                     total += float(state.state)
                 except (ValueError, TypeError):
                     _LOGGER.warning("Could not convert state to float: %s", state.state)
+            else:
+                unavailable_entities.append(entity_id)
         
         if not any_available:
-            self._attr_available = False
-            self._attr_native_value = None
+            # Don't update if no devices are available yet
+            # Keep previous state during restart
+            if not self._attr_available:
+                self._attr_native_value = 0.0
+            
+            # Create devices unavailable issue if not already created
+            if not self._devices_issue_created:
+                async_create_sensor_unavailable_issue(
+                    self.hass,
+                    "power_remainder",
+                    self._attr_name,
+                    self._group_name,
+                    unavailable_entities
+                )
+                self._devices_issue_created = True
         else:
             self._attr_available = True
-            self._attr_native_value = round(upstream_value - total, 2)
+            self._attr_native_value = upstream_value - total
+            
+            # Delete devices issue if it was created
+            if self._devices_issue_created:
+                async_delete_sensor_unavailable_issue(
+                    self.hass,
+                    "power_remainder",
+                    self._attr_name,
+                    self._group_name
+                )
+                self._devices_issue_created = False
 
 
-class PhantomEnergyRemainderSensor(PhantomBaseSensor):
+class PhantomEnergyRemainderSensor(PhantomBaseSensor, RestoreEntity):
     """Sensor for energy remainder (upstream - total)."""
     
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_suggested_display_precision = 3
     _attr_icon = "mdi:lightning-bolt-outline"
     
     def __init__(
@@ -133,9 +210,22 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor):
         self._upstream_meter_entity = None
         self._utility_meter_entities = []
         self._setup_delayed = False
+        self._upstream_issue_created = False
+        self._devices_issue_created = False
     
     async def async_added_to_hass(self) -> None:
         """Handle entity added to hass."""
+        await super().async_added_to_hass()
+        
+        # Restore previous state if available
+        if (last_state := await self.async_get_last_state()) is not None:
+            if last_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                try:
+                    self._attr_native_value = float(last_state.state)
+                    self._attr_available = True
+                except (ValueError, TypeError):
+                    pass
+        
         # Delay setup to allow meters to be created
         self.hass.async_create_task(self._delayed_setup())
     
@@ -264,10 +354,13 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor):
         return utility_meters
     
     @callback
-    def _handle_state_change(self, event) -> None:
+    def _handle_state_change(self, event: Event) -> None:
         """Handle state changes of tracked entities."""
-        self._update_state()
-        self.async_write_ha_state()
+        # Only update if the new state is valid
+        new_state = event.data.get("new_state")
+        if new_state is not None:
+            self._update_state()
+            self.async_write_ha_state()
     
     @callback
     def _update_state(self) -> None:
@@ -292,20 +385,45 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor):
         
         if upstream_value is None:
             _LOGGER.debug(
-                "Energy remainder '%s' - upstream value is None, marking unavailable",
+                "Energy remainder '%s' - upstream value is None",
                 self._group_name,
             )
-            self._attr_available = False
-            self._attr_native_value = None
+            # Don't update if upstream is not available yet
+            # Keep previous state during restart
+            if not self._attr_available:
+                self._attr_native_value = 0.0
+            
+            # Create upstream issue if not already created
+            if not self._upstream_issue_created:
+                async_create_sensor_unavailable_issue(
+                    self.hass,
+                    "energy_remainder_upstream",
+                    "Upstream Energy Meter",
+                    self._group_name,
+                    [self._upstream_meter_entity] if self._upstream_meter_entity else []
+                )
+                self._upstream_issue_created = True
             return
+        else:
+            # Delete upstream issue if it was created
+            if self._upstream_issue_created:
+                async_delete_sensor_unavailable_issue(
+                    self.hass,
+                    "energy_remainder_upstream",
+                    "Upstream Energy Meter", 
+                    self._group_name
+                )
+                self._upstream_issue_created = False
         
         # Calculate total from utility meters
         total = 0
         any_available = False
+        unavailable_entities = []
         
         for entity_id in self._utility_meter_entities:
             state = self.hass.states.get(entity_id)
             if state is None:
+                unavailable_entities.append(entity_id)
                 continue
                 
             if state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
@@ -321,19 +439,34 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor):
                     )
                 except (ValueError, TypeError):
                     _LOGGER.warning("Could not convert state to float: %s", state.state)
+            else:
+                unavailable_entities.append(entity_id)
         
         if not any_available:
             _LOGGER.debug(
-                "Energy remainder '%s' - no utility meters available, marking unavailable",
+                "Energy remainder '%s' - no utility meters available",
                 self._group_name,
             )
-            self._attr_available = False
-            self._attr_native_value = None
+            # Don't update if no devices are available yet
+            # Keep previous state during restart
+            if not self._attr_available:
+                self._attr_native_value = 0.0
+            
+            # Create devices issue if not already created
+            if not self._devices_issue_created:
+                async_create_sensor_unavailable_issue(
+                    self.hass,
+                    "energy_remainder",
+                    self._attr_name,
+                    self._group_name,
+                    unavailable_entities
+                )
+                self._devices_issue_created = True
         else:
             self._attr_available = True
             remainder = upstream_value - total
             # Energy remainder should not go negative
-            self._attr_native_value = round(max(0, remainder), 3)
+            self._attr_native_value = max(0, remainder)
             _LOGGER.debug(
                 "Energy remainder '%s' - calculated: %s - %s = %s",
                 self._group_name,
@@ -341,3 +474,13 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor):
                 total,
                 self._attr_native_value,
             )
+            
+            # Delete devices issue if it was created
+            if self._devices_issue_created:
+                async_delete_sensor_unavailable_issue(
+                    self.hass,
+                    "energy_remainder",
+                    self._attr_name,
+                    self._group_name
+                )
+                self._devices_issue_created = False

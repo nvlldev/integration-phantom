@@ -16,7 +16,7 @@ from homeassistant.const import (
     STATE_UNKNOWN,
     UnitOfEnergy,
 )
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant, callback, Event
 from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_time_interval,
@@ -28,6 +28,10 @@ from .base import PhantomBaseSensor, PhantomDeviceSensor
 from ..const import CONF_DEVICE_ID
 from ..state_migration import get_migrated_state
 from ..utils import sanitize_name
+from ..repairs import (
+    async_create_sensor_unavailable_issue,
+    async_delete_sensor_unavailable_issue,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -59,6 +63,7 @@ class PhantomEnergySensor(PhantomBaseSensor, RestoreEntity):
         self._attr_name = "Energy Total"
         self._utility_meter_entities = []
         self._setup_delayed = False
+        self._issue_created = False
     
     async def async_added_to_hass(self) -> None:
         """Handle entity added to hass."""
@@ -145,10 +150,13 @@ class PhantomEnergySensor(PhantomBaseSensor, RestoreEntity):
         return utility_meters
     
     @callback
-    def _handle_state_change(self, event) -> None:
+    def _handle_state_change(self, event: Event) -> None:
         """Handle state changes of tracked entities."""
-        self._update_state()
-        self.async_write_ha_state()
+        # Only update if the new state is valid
+        new_state = event.data.get("new_state")
+        if new_state is not None:
+            self._update_state()
+            self.async_write_ha_state()
     
     @callback
     def _update_state(self) -> None:
@@ -172,10 +180,34 @@ class PhantomEnergySensor(PhantomBaseSensor, RestoreEntity):
                     _LOGGER.warning("Could not convert state to float: %s", state.state)
         
         if all_unavailable:
-            self._attr_available = False
+            # Return 0 instead of marking unavailable
+            self._attr_available = True
+            self._attr_native_value = 0.0
+            
+            # Create repair issue if not already created
+            if not self._issue_created:
+                async_create_sensor_unavailable_issue(
+                    self.hass,
+                    "energy_total",
+                    self._attr_name,
+                    self._group_name,
+                    [e for e in self._utility_meter_entities if self.hass.states.get(e) and 
+                     self.hass.states.get(e).state in (STATE_UNAVAILABLE, STATE_UNKNOWN)]
+                )
+                self._issue_created = True
         else:
             self._attr_available = True
             self._attr_native_value = total
+            
+            # Delete repair issue if it was created
+            if self._issue_created:
+                async_delete_sensor_unavailable_issue(
+                    self.hass,
+                    "energy_total",
+                    self._attr_name,
+                    self._group_name
+                )
+                self._issue_created = False
 
 
 class PhantomUtilityMeterSensor(PhantomDeviceSensor, RestoreEntity):
@@ -211,6 +243,7 @@ class PhantomUtilityMeterSensor(PhantomDeviceSensor, RestoreEntity):
         self._attr_name = f"{device_name} Energy Meter"
         self._last_value = None
         self._total_consumed = 0.0
+        self._issue_created = False
     
     async def async_added_to_hass(self) -> None:
         """Handle entity added to hass."""
@@ -318,7 +351,21 @@ class PhantomUtilityMeterSensor(PhantomDeviceSensor, RestoreEntity):
         new_state = event.data.get("new_state")
         
         if new_state is None or new_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-            self._attr_available = False
+            # Return 0 instead of marking unavailable - keep tracking total
+            self._attr_available = True
+            # Don't update native_value, keep the accumulated total
+            
+            # Create repair issue if not already created
+            if not self._issue_created:
+                async_create_sensor_unavailable_issue(
+                    self.hass,
+                    "utility_meter",
+                    self._device_name,
+                    self._group_name,
+                    [self._energy_entity]
+                )
+                self._issue_created = True
+            
             self.async_write_ha_state()
             return
         
@@ -343,9 +390,32 @@ class PhantomUtilityMeterSensor(PhantomDeviceSensor, RestoreEntity):
             self._attr_available = True
             self._attr_native_value = self._total_consumed
             
+            # Delete repair issue if it was created
+            if self._issue_created:
+                async_delete_sensor_unavailable_issue(
+                    self.hass,
+                    "utility_meter",
+                    self._device_name,
+                    self._group_name
+                )
+                self._issue_created = False
+            
         except (ValueError, TypeError) as err:
             _LOGGER.warning("Could not update utility meter: %s", err)
-            self._attr_available = False
+            # Keep available and maintain the total
+            self._attr_available = True
+            # Don't update native_value, keep the accumulated total
+            
+            # Create repair issue if not already created
+            if not self._issue_created:
+                async_create_sensor_unavailable_issue(
+                    self.hass,
+                    "utility_meter", 
+                    self._device_name,
+                    self._group_name,
+                    [self._energy_entity]
+                )
+                self._issue_created = True
         
         self.async_write_ha_state()
     

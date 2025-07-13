@@ -11,7 +11,7 @@ from homeassistant.const import (
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
 )
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant, callback, Event
 from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_time_interval,
@@ -23,10 +23,15 @@ from .base import PhantomBaseSensor, PhantomDeviceSensor
 from ..const import CONF_DEVICE_ID, DOMAIN
 from ..tariff import TariffManager
 from ..tariff_external import ExternalTariffManager
+from ..repairs import (
+    async_create_sensor_unavailable_issue,
+    async_delete_sensor_unavailable_issue,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 # Force update interval to ensure graphs stay smooth and responsive
+# This should be frequent enough to catch rate changes promptly
 COST_SENSOR_UPDATE_INTERVAL = timedelta(seconds=10)
 
 
@@ -113,15 +118,19 @@ class PhantomDeviceHourlyCostSensor(PhantomDeviceSensor):
         state = self.hass.states.get(self._power_entity)
         
         if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-            self._attr_available = False
-            self._attr_native_value = None
+            # Return 0 instead of marking unavailable
+            self._attr_available = True
+            self._attr_native_value = 0.0
+            self._current_power = 0.0
             return
             
         try:
             self._current_power = float(state.state)
         except (ValueError, TypeError):
-            self._attr_available = False
-            self._attr_native_value = None
+            # Return 0 instead of marking unavailable
+            self._attr_available = True
+            self._attr_native_value = 0.0
+            self._current_power = 0.0
             return
         
         # Get current rate
@@ -229,8 +238,10 @@ class PhantomGroupHourlyCostSensor(PhantomBaseSensor):
                     _LOGGER.warning("Could not convert state to float: %s", state.state)
         
         if all_unavailable:
-            self._attr_available = False
-            self._attr_native_value = None
+            # Return 0 instead of marking unavailable
+            self._attr_available = True
+            self._attr_native_value = 0.0
+            self._total_power = 0.0
             return
         
         self._total_power = total
@@ -396,7 +407,9 @@ class PhantomDeviceTotalCostSensor(PhantomDeviceSensor, RestoreEntity):
                 self._utility_meter_entity,
                 self._device_name
             )
-            self._attr_available = False
+            # Keep available but with 0 value
+            self._attr_available = True
+            self._attr_native_value = self._total_cost
         elif state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
             _LOGGER.warning(
                 "Utility meter entity %s is %s for device %s",
@@ -404,7 +417,9 @@ class PhantomDeviceTotalCostSensor(PhantomDeviceSensor, RestoreEntity):
                 state.state,
                 self._device_name
             )
-            self._attr_available = False
+            # Keep available but with current total
+            self._attr_available = True
+            self._attr_native_value = self._total_cost
         else:
             try:
                 # Utility meter is already in kWh
@@ -426,7 +441,9 @@ class PhantomDeviceTotalCostSensor(PhantomDeviceSensor, RestoreEntity):
                     err,
                     state.state
                 )
-                self._attr_available = False
+                # Keep available with current total
+                self._attr_available = True
+                self._attr_native_value = self._total_cost
         
         # Only track if we have a valid entity
         if state is not None:
@@ -478,11 +495,14 @@ class PhantomDeviceTotalCostSensor(PhantomDeviceSensor, RestoreEntity):
         
         if new_state is None or new_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
             _LOGGER.debug(
-                "Total cost sensor %s marking unavailable due to state: %s",
+                "Total cost sensor %s keeping current total due to state: %s",
                 self._device_name,
                 new_state.state if new_state else "None"
             )
-            self._attr_available = False
+            # Keep available with current total
+            self._attr_available = True
+            # Maintain current total cost
+            self.async_write_ha_state()
             return
         
         try:
@@ -560,7 +580,8 @@ class PhantomDeviceTotalCostSensor(PhantomDeviceSensor, RestoreEntity):
             
         except (ValueError, TypeError) as err:
             _LOGGER.warning("Error calculating cost for %s: %s", self._device_name, err)
-            self._attr_available = False
+            # Keep available with current total
+            self._attr_available = True
         
         # Always write state after processing
         self.async_write_ha_state()
@@ -572,51 +593,71 @@ class PhantomDeviceTotalCostSensor(PhantomDeviceSensor, RestoreEntity):
         if self._attr_available and self._attr_native_value is not None:
             current_rate = self._tariff_manager.get_current_rate()
             
-            # Check if we need to handle a rate change during constant power consumption
-            if (self._last_rate is not None and 
-                self._last_update_time is not None and
-                current_rate != self._last_rate and
+            # Handle ongoing consumption during steady power draw
+            if (self._last_update_time is not None and
                 self._last_meter_value is not None):
                 
-                # Get current meter value to check if there's ongoing consumption
+                # Calculate time since last update
+                time_diff = (now - self._last_update_time).total_seconds() / 3600  # hours
+                
+                # Get current meter value
                 meter_state = self.hass.states.get(self._utility_meter_entity)
                 if meter_state and meter_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
                     try:
                         current_meter_value = float(meter_state.state)
+                        meter_diff = current_meter_value - self._last_meter_value
                         
-                        # If meter hasn't changed, we need to estimate consumption based on time
-                        # This handles the case where power is constant during a rate change
-                        if abs(current_meter_value - self._last_meter_value) < 0.000001:
-                            # Calculate time-based estimation if we have a power entity
+                        # If meter has advanced, use actual consumption
+                        if meter_diff > 0.000001:
+                            # Meter has updated, this will be handled by state change event
+                            pass
+                        else:
+                            # Meter hasn't updated - estimate based on current power
                             power_entity_id = self._utility_meter_entity.replace("_energy_daily", "")
                             power_state = self.hass.states.get(power_entity_id)
                             
                             if power_state and power_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
                                 try:
                                     power_watts = float(power_state.state)
-                                    if power_watts > 0:
-                                        # Calculate energy consumed since last update
-                                        time_diff = (now - self._last_update_time).total_seconds() / 3600  # hours
+                                    if power_watts > 0 and time_diff > 0:
+                                        # Estimate energy consumption
                                         estimated_energy = (power_watts / 1000) * time_diff  # kWh
                                         
-                                        # Calculate cost at the old rate for the period
-                                        cost_at_old_rate = self._tariff_manager.calculate_energy_cost(
-                                            estimated_energy, self._last_rate
+                                        # Use the rate that was in effect for this period
+                                        # If rate changed, use old rate; otherwise use current
+                                        rate_for_period = self._last_rate if self._last_rate is not None else current_rate
+                                        
+                                        # Calculate cost for this period
+                                        cost_delta = self._tariff_manager.calculate_energy_cost(
+                                            estimated_energy, rate_for_period
                                         )
                                         
-                                        # Add the cost
-                                        self._total_cost += cost_at_old_rate
+                                        # Add to total cost
+                                        self._total_cost += cost_delta
                                         self._attr_native_value = self._total_cost
                                         
-                                        _LOGGER.info(
-                                            "Applied TOU rate change for %s: %.3f kWh at old rate %.3f %s/kWh = %.6f %s",
+                                        # Update virtual meter value
+                                        self._last_meter_value += estimated_energy
+                                        
+                                        _LOGGER.debug(
+                                            "Periodic cost update for %s: %.6f kWh at rate %.3f = %.6f %s (total: %.3f)",
                                             self._device_name,
                                             estimated_energy,
-                                            self._last_rate,
+                                            rate_for_period,
+                                            cost_delta,
                                             self._tariff_manager.currency_symbol,
-                                            cost_at_old_rate,
-                                            self._tariff_manager.currency
+                                            self._total_cost
                                         )
+                                        
+                                        # Log rate changes
+                                        if self._last_rate is not None and current_rate != self._last_rate:
+                                            _LOGGER.info(
+                                                "TOU rate changed for %s: %.3f -> %.3f %s/kWh",
+                                                self._device_name,
+                                                self._last_rate,
+                                                current_rate,
+                                                self._tariff_manager.currency_symbol
+                                            )
                                 except (ValueError, TypeError):
                                     pass
                     except (ValueError, TypeError):
@@ -626,13 +667,6 @@ class PhantomDeviceTotalCostSensor(PhantomDeviceSensor, RestoreEntity):
             self._last_rate = current_rate
             self._last_update_time = now
             
-            _LOGGER.debug(
-                "Periodic update for %s total cost sensor: %.3f %s (rate: %.3f)",
-                self._device_name,
-                self._attr_native_value,
-                self._tariff_manager.currency,
-                current_rate
-            )
             # Force state write to ensure UI updates
             self.async_write_ha_state()
     
@@ -690,6 +724,17 @@ class PhantomGroupTotalCostSensor(PhantomBaseSensor, RestoreEntity):
     
     async def async_added_to_hass(self) -> None:
         """Handle entity added to hass."""
+        await super().async_added_to_hass()
+        
+        # Restore previous state if available
+        if (last_state := await self.async_get_last_state()) is not None:
+            if last_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                try:
+                    self._attr_native_value = float(last_state.state)
+                    self._attr_available = True
+                except (ValueError, TypeError):
+                    pass
+        
         # Delay setup to allow device cost sensors to be created
         self.hass.async_create_task(self._delayed_setup())
     
@@ -742,10 +787,13 @@ class PhantomGroupTotalCostSensor(PhantomBaseSensor, RestoreEntity):
         return cost_entities
     
     @callback
-    def _handle_state_change(self, event) -> None:
+    def _handle_state_change(self, event: Event) -> None:
         """Handle state changes of tracked entities."""
-        self._update_state()
-        self.async_write_ha_state()
+        # Only update if the new state is valid
+        new_state = event.data.get("new_state")
+        if new_state is not None:
+            self._update_state()
+            self.async_write_ha_state()
     
     @callback
     def _update_state(self) -> None:
@@ -770,8 +818,9 @@ class PhantomGroupTotalCostSensor(PhantomBaseSensor, RestoreEntity):
                     _LOGGER.warning("Could not convert state to float: %s", state.state)
         
         if not any_available:
-            self._attr_available = False
-            self._attr_native_value = None
+            # Return 0 instead of marking unavailable
+            self._attr_available = True
+            self._attr_native_value = 0.0
         else:
             self._attr_available = True
             self._attr_native_value = total

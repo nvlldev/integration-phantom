@@ -20,6 +20,10 @@ from homeassistant.helpers.restore_state import RestoreEntity
 
 from .base import PhantomBaseSensor
 from ..state_migration import get_migrated_state
+from ..repairs import (
+    async_create_upstream_unavailable_issue,
+    async_delete_upstream_unavailable_issue,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,6 +34,7 @@ class PhantomUpstreamPowerSensor(PhantomBaseSensor):
     _attr_device_class = SensorDeviceClass.POWER
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 1
     _attr_icon = "mdi:transmission-tower"
     
     def __init__(
@@ -43,6 +48,7 @@ class PhantomUpstreamPowerSensor(PhantomBaseSensor):
         super().__init__(config_entry_id, group_name, group_id, "upstream_power")
         self._upstream_entity = upstream_entity
         self._attr_name = "Upstream Power"
+        self._issue_created = False
     
     async def async_added_to_hass(self) -> None:
         """Handle entity added to hass."""
@@ -67,16 +73,35 @@ class PhantomUpstreamPowerSensor(PhantomBaseSensor):
         state = self.hass.states.get(self._upstream_entity)
         
         if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-            self._attr_available = False
-            self._attr_native_value = None
+            # Return 0 instead of marking unavailable
+            self._attr_available = True
+            self._attr_native_value = 0.0
+            
+            # Create repair issue if not already created
+            if not self._issue_created:
+                async_create_upstream_unavailable_issue(
+                    self.hass,
+                    self._group_name,
+                    self._upstream_entity
+                )
+                self._issue_created = True
         else:
             self._attr_available = True
             try:
-                self._attr_native_value = round(float(state.state), 2)
+                self._attr_native_value = float(state.state)
             except (ValueError, TypeError):
                 _LOGGER.warning("Could not convert state to float: %s", state.state)
-                self._attr_available = False
-                self._attr_native_value = None
+                # Return 0 instead of marking unavailable
+                self._attr_available = True
+                self._attr_native_value = 0.0
+            else:
+                # Delete repair issue if it was created and sensor is now available
+                if self._issue_created:
+                    async_delete_upstream_unavailable_issue(
+                        self.hass,
+                        self._group_name
+                    )
+                    self._issue_created = False
 
 
 class PhantomUpstreamEnergyMeterSensor(PhantomBaseSensor, RestoreEntity):
@@ -85,6 +110,7 @@ class PhantomUpstreamEnergyMeterSensor(PhantomBaseSensor, RestoreEntity):
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_suggested_display_precision = 3
     _attr_icon = "mdi:transmission-tower"
     
     @property
@@ -110,6 +136,7 @@ class PhantomUpstreamEnergyMeterSensor(PhantomBaseSensor, RestoreEntity):
         self._attr_name = "Upstream Energy Meter"
         self._last_value = None
         self._total_consumed = 0.0
+        self._issue_created = False
     
     async def async_added_to_hass(self) -> None:
         """Handle entity added to hass."""
@@ -219,7 +246,19 @@ class PhantomUpstreamEnergyMeterSensor(PhantomBaseSensor, RestoreEntity):
         )
         
         if new_state is None or new_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-            self._attr_available = False
+            # Keep available and maintain the total
+            self._attr_available = True
+            # Don't update native_value, keep the accumulated total
+            
+            # Create repair issue if not already created
+            if not self._issue_created:
+                async_create_upstream_unavailable_issue(
+                    self.hass,
+                    self._group_name,
+                    self._upstream_entity
+                )
+                self._issue_created = True
+            
             self.async_write_ha_state()
             return
         
@@ -266,11 +305,30 @@ class PhantomUpstreamEnergyMeterSensor(PhantomBaseSensor, RestoreEntity):
             
             self._last_value = new_value
             self._attr_available = True
-            self._attr_native_value = round(self._total_consumed, 3)
+            self._attr_native_value = self._total_consumed
+            
+            # Delete repair issue if it was created and sensor is now available
+            if self._issue_created:
+                async_delete_upstream_unavailable_issue(
+                    self.hass,
+                    self._group_name
+                )
+                self._issue_created = False
             
         except (ValueError, TypeError) as err:
             _LOGGER.warning("Could not update upstream meter: %s", err)
-            self._attr_available = False
+            # Keep available and maintain the total
+            self._attr_available = True
+            # Don't update native_value, keep the accumulated total
+            
+            # Create repair issue if not already created
+            if not self._issue_created:
+                async_create_upstream_unavailable_issue(
+                    self.hass,
+                    self._group_name,
+                    self._upstream_entity
+                )
+                self._issue_created = True
         
         self.async_write_ha_state()
     

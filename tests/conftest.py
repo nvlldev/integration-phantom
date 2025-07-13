@@ -1,152 +1,151 @@
-"""Common fixtures for Phantom Power Monitoring tests."""
+"""Test configuration with comprehensive mocking."""
+# Import mock setup first - this must be before any HA imports
+from .mock_setup import setup_mocks
+setup_mocks()
+
+import sys
+from unittest.mock import MagicMock, Mock
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
-from homeassistant.const import STATE_UNKNOWN, STATE_UNAVAILABLE
-from homeassistant.core import HomeAssistant
+
+# Now we can safely import HA modules
+from homeassistant.const import (
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
+    UnitOfPower,
+    UnitOfEnergy,
+)
+from homeassistant.core import HomeAssistant, State, Event
+from homeassistant.components.sensor import (
+    SensorEntity,
+    SensorStateClass,
+    SensorDeviceClass,
+)
+from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers import entity_registry as er
+
+# Mock panel to avoid import issues
+sys.modules['custom_components.phantom.panel'] = MagicMock()
+
+# Now import our constants
 from custom_components.phantom.const import (
     DOMAIN,
-    CONF_GROUPS,
+    CONF_NAME,
+    CONF_UTILITY_METER_NAME,
+    CONF_DEVICE_ID,
     CONF_DEVICES,
+    CONF_GROUP_DEVICES,
     CONF_GROUP_NAME,
     CONF_GROUP_ID,
-    CONF_DEVICE_ID,
-    CONF_UPSTREAM_POWER_ENTITY,
-    CONF_UPSTREAM_ENERGY_ENTITY,
-    CONF_TARIFF,
-    CONF_TARIFF_ENABLED,
-    CONF_TARIFF_CURRENCY,
-    CONF_TARIFF_CURRENCY_SYMBOL,
-    CONF_TARIFF_RATE_STRUCTURE,
-    CONF_TARIFF_RATE_TYPE,
-    CONF_TARIFF_FLAT_RATE,
-    CONF_TARIFF_TOU_RATES,
-    CONF_TOU_NAME,
-    CONF_TOU_RATE,
-    CONF_TOU_START_TIME,
-    CONF_TOU_END_TIME,
-    CONF_TOU_DAYS,
-    TARIFF_TYPE_FLAT,
-    TARIFF_TYPE_TOU,
+    CONF_ENERGY_RATE,
+    CONF_TOU_RATES,
+    ATTR_ENTRIES,
 )
 
 
 @pytest.fixture
 def mock_hass():
-    """Return a mock Home Assistant instance."""
+    """Create a mock Home Assistant instance."""
     hass = MagicMock(spec=HomeAssistant)
     hass.states = MagicMock()
     hass.states.get = MagicMock(return_value=None)
-    hass.data = {DOMAIN: {}}
+    hass.data = {}
+    hass.bus = MagicMock()
     hass.async_create_task = MagicMock()
-    hass.helpers = MagicMock()
+    hass.config = MagicMock()
+    hass.config.units = MagicMock()
+    hass.config_entries = MagicMock()
+    hass.config_entries.async_get_entry = MagicMock(return_value=None)
     return hass
 
 
 @pytest.fixture
 def mock_config_entry():
-    """Return a mock config entry."""
+    """Create a mock config entry."""
     entry = MagicMock()
     entry.entry_id = "test_entry_id"
-    entry.data = {}
+    entry.data = {
+        CONF_NAME: "Test Integration",
+        CONF_UTILITY_METER_NAME: "sensor.utility_meter",
+        CONF_DEVICES: [
+            {
+                CONF_NAME: "Device 1",
+                CONF_DEVICE_ID: "device1_id",
+            },
+            {
+                CONF_NAME: "Device 2", 
+                CONF_DEVICE_ID: "device2_id",
+            },
+        ],
+        CONF_GROUP_DEVICES: [
+            {
+                CONF_GROUP_NAME: "Group 1",
+                CONF_GROUP_ID: "group1_id",
+                CONF_DEVICES: ["device1_id", "device2_id"],
+            }
+        ],
+        CONF_ENERGY_RATE: 0.12,
+        CONF_TOU_RATES: [],
+    }
     entry.options = {}
+    entry.title = "Test Integration"
+    entry.unique_id = "test_unique_id"
     return entry
 
 
 @pytest.fixture
-def sample_device_config():
-    """Return sample device configuration."""
-    return {
-        "name": "Test Device",
-        "power_entity": "sensor.test_power",
-        "energy_entity": "sensor.test_energy",
-        CONF_DEVICE_ID: "device_123",
-    }
-
-
-@pytest.fixture
-def sample_group_config(sample_device_config):
-    """Return sample group configuration."""
-    return {
-        CONF_GROUP_NAME: "Test Group",
-        CONF_GROUP_ID: "group_123",
-        CONF_DEVICES: [sample_device_config],
-        CONF_UPSTREAM_POWER_ENTITY: "sensor.upstream_power",
-        CONF_UPSTREAM_ENERGY_ENTITY: "sensor.upstream_energy",
-    }
-
-
-@pytest.fixture
-def sample_flat_tariff_config():
-    """Return sample flat rate tariff configuration."""
-    return {
-        CONF_TARIFF_ENABLED: True,
-        CONF_TARIFF_CURRENCY: "USD",
-        CONF_TARIFF_CURRENCY_SYMBOL: "$",
-        CONF_TARIFF_RATE_STRUCTURE: {
-            CONF_TARIFF_RATE_TYPE: TARIFF_TYPE_FLAT,
-            CONF_TARIFF_FLAT_RATE: 0.15,
-        }
-    }
-
-
-@pytest.fixture
-def sample_tou_tariff_config():
-    """Return sample TOU tariff configuration."""
-    return {
-        CONF_TARIFF_ENABLED: True,
-        CONF_TARIFF_CURRENCY: "USD",
-        CONF_TARIFF_CURRENCY_SYMBOL: "$",
-        CONF_TARIFF_RATE_STRUCTURE: {
-            CONF_TARIFF_RATE_TYPE: TARIFF_TYPE_TOU,
-            CONF_TARIFF_TOU_RATES: [
-                {
-                    CONF_TOU_NAME: "Peak",
-                    CONF_TOU_RATE: 0.30,
-                    CONF_TOU_START_TIME: "17:00",
-                    CONF_TOU_END_TIME: "21:00",
-                    CONF_TOU_DAYS: [0, 1, 2, 3, 4],  # Weekdays
-                },
-                {
-                    CONF_TOU_NAME: "Off-Peak",
-                    CONF_TOU_RATE: 0.10,
-                    CONF_TOU_START_TIME: "21:00",
-                    CONF_TOU_END_TIME: "17:00",
-                    CONF_TOU_DAYS: [0, 1, 2, 3, 4, 5, 6],  # All days
-                },
-            ]
-        }
-    }
-
-
-@pytest.fixture
-def sample_external_tariff_config():
-    """Return sample external tariff configuration."""
-    return {
-        CONF_TARIFF_ENABLED: True,
-        CONF_TARIFF_CURRENCY: "USD",
-        CONF_TARIFF_CURRENCY_SYMBOL: "$",
-        "rate_entity": "sensor.electricity_rate",
-        "period_entity": "sensor.tou_period",
-    }
-
-
-@pytest.fixture
 def mock_state():
-    """Return a mock state object."""
-    def _mock_state(entity_id, state, attributes=None):
-        mock = MagicMock()
+    """Create a mock state factory."""
+    def _create_state(entity_id, state, attributes=None):
+        mock = MagicMock(spec=State)
         mock.entity_id = entity_id
         mock.state = state
         mock.attributes = attributes or {}
+        mock.last_changed = datetime.now()
+        mock.last_updated = datetime.now()
         return mock
-    return _mock_state
+    return _create_state
+
+
+@pytest.fixture  
+def mock_entity_registry():
+    """Create a mock entity registry."""
+    registry = MagicMock()
+    registry.entities = {}
+    registry.async_get = MagicMock(return_value=registry)
+    return registry
 
 
 @pytest.fixture
-def mock_entity_registry():
-    """Return a mock entity registry."""
+def mock_device_registry():
+    """Create a mock device registry."""
     registry = MagicMock()
-    registry.entities = {}
+    registry.devices = {}
+    registry.async_get = MagicMock(return_value=registry)
     return registry
+
+
+@pytest.fixture
+def mock_tariff_manager():
+    """Create a mock tariff manager."""
+    manager = MagicMock()
+    manager.currency = "USD"
+    manager.currency_symbol = "$"
+    manager.get_current_rate = MagicMock(return_value=0.15)
+    manager.get_current_period_info = MagicMock(return_value=None)
+    return manager
+
+
+@pytest.fixture
+def mock_coordinator():
+    """Create a mock data update coordinator."""
+    coordinator = MagicMock()
+    coordinator.data = {
+        "devices": {},
+        "groups": {},
+    }
+    coordinator.async_request_refresh = MagicMock()
+    coordinator.async_add_listener = MagicMock()
+    coordinator.last_update_success = True
+    return coordinator

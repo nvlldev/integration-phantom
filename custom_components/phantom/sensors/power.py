@@ -17,6 +17,12 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_state_change_event
 
 from .base import PhantomBaseSensor, PhantomDeviceSensor
+from ..repairs import (
+    async_create_sensor_unavailable_issue,
+    async_delete_sensor_unavailable_issue,
+    async_create_all_devices_unavailable_issue,
+    async_delete_all_devices_unavailable_issue,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,6 +47,7 @@ class PhantomPowerSensor(PhantomBaseSensor):
         super().__init__(config_entry_id, group_name, group_id, "power_total")
         self._power_entities = power_entities
         self._attr_name = "Power Total"
+        self._issue_created = False
     
     async def async_added_to_hass(self) -> None:
         """Handle entity added to hass."""
@@ -64,10 +71,12 @@ class PhantomPowerSensor(PhantomBaseSensor):
         """Update the sensor state."""
         total = 0
         all_unavailable = True
+        unavailable_entities = []
         
         for entity_id in self._power_entities:
             state = self.hass.states.get(entity_id)
             if state is None:
+                unavailable_entities.append(entity_id)
                 continue
                 
             if state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
@@ -76,13 +85,33 @@ class PhantomPowerSensor(PhantomBaseSensor):
                     total += float(state.state)
                 except (ValueError, TypeError):
                     _LOGGER.warning("Could not convert state to float: %s", state.state)
+            else:
+                unavailable_entities.append(entity_id)
         
         if all_unavailable:
-            self._attr_available = False
-            self._attr_native_value = None
+            # Return 0 instead of marking unavailable
+            self._attr_available = True
+            self._attr_native_value = 0.0
+            
+            # Create repair issue if not already created
+            if not self._issue_created:
+                async_create_all_devices_unavailable_issue(
+                    self.hass,
+                    self._group_name,
+                    unavailable_entities
+                )
+                self._issue_created = True
         else:
             self._attr_available = True
             self._attr_native_value = total
+            
+            # Delete repair issue if it was created
+            if self._issue_created:
+                async_delete_all_devices_unavailable_issue(
+                    self.hass,
+                    self._group_name
+                )
+                self._issue_created = False
 
 
 class PhantomIndividualPowerSensor(PhantomDeviceSensor):
@@ -105,6 +134,7 @@ class PhantomIndividualPowerSensor(PhantomDeviceSensor):
         super().__init__(config_entry_id, group_name, device_name, device_id, "power")
         self._power_entity = power_entity
         self._attr_name = f"{device_name} Power"
+        self._issue_created = False
     
     @property
     def icon(self) -> str | None:
@@ -138,13 +168,36 @@ class PhantomIndividualPowerSensor(PhantomDeviceSensor):
         state = self.hass.states.get(self._power_entity)
         
         if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-            self._attr_available = False
-            self._attr_native_value = None
+            # Return 0 instead of marking unavailable
+            self._attr_available = True
+            self._attr_native_value = 0.0
+            
+            # Create repair issue if not already created
+            if not self._issue_created:
+                async_create_sensor_unavailable_issue(
+                    self.hass,
+                    "power",
+                    self._device_name,
+                    self._group_name,
+                    [self._power_entity]
+                )
+                self._issue_created = True
         else:
             self._attr_available = True
             try:
                 self._attr_native_value = float(state.state)
             except (ValueError, TypeError):
                 _LOGGER.warning("Could not convert state to float: %s", state.state)
-                self._attr_available = False
-                self._attr_native_value = None
+                # Return 0 instead of marking unavailable
+                self._attr_available = True
+                self._attr_native_value = 0.0
+            else:
+                # Delete repair issue if it was created and sensor is now available
+                if self._issue_created:
+                    async_delete_sensor_unavailable_issue(
+                        self.hass,
+                        "power",
+                        self._device_name,
+                        self._group_name
+                    )
+                    self._issue_created = False

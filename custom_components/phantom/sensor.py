@@ -44,6 +44,7 @@ from .sensors import (
     PhantomDeviceTotalCostSensor,
     PhantomGroupTotalCostSensor,
 )
+from .sensors.remainder_cost_energy_based import PhantomEnergyBasedCostRemainderSensor
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -453,6 +454,37 @@ async def _create_group_sensors(
             if cost_entities:
                 async_add_entities(cost_entities)
                 _LOGGER.info("Added %d delayed total cost sensors for group '%s'", len(cost_entities), group_name)
+                
+                # Create cost remainder sensor if we have an energy remainder sensor
+                # Find energy remainder entity
+                energy_remainder_entity = None
+                if upstream_energy_entity and energy_entities:
+                    # Look for energy remainder sensor
+                    expected_energy_remainder_id = f"{group_id}_energy_remainder" if group_id else f"{config_entry.entry_id}_{group_name.lower().replace(' ', '_')}_energy_remainder"
+                    
+                    for entity_id, entry in entity_registry.entities.items():
+                        if (entry.unique_id == expected_energy_remainder_id and 
+                            entry.domain == "sensor" and
+                            entry.platform == DOMAIN):
+                            energy_remainder_entity = entity_id
+                            _LOGGER.debug("Found energy remainder entity: %s", energy_remainder_entity)
+                            break
+                
+                if energy_remainder_entity:
+                    cost_remainder_sensor = PhantomEnergyBasedCostRemainderSensor(
+                        hass,
+                        config_entry.entry_id,
+                        group_name,
+                        group_id,
+                        energy_remainder_entity,
+                        tariff_manager,
+                    )
+                    async_add_entities([cost_remainder_sensor])
+                    _LOGGER.info(
+                        "Created cost remainder sensor for group '%s' tracking energy remainder %s",
+                        group_name,
+                        energy_remainder_entity
+                    )
             else:
                 _LOGGER.error(
                     "No total cost sensors created for group '%s' after %d attempts - no utility meters found",
