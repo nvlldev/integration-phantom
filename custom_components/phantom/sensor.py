@@ -36,6 +36,7 @@ from .sensors import (
     PhantomUtilityMeterSensor,
     PhantomUpstreamPowerSensor,
     PhantomUpstreamEnergyMeterSensor,
+    PhantomUpstreamCostSensor,
     PhantomPowerRemainderSensor,
     PhantomEnergyRemainderSensor,
     PhantomDeviceHourlyCostSensor,
@@ -485,6 +486,36 @@ async def _create_group_sensors(
                         group_name,
                         energy_remainder_entity
                     )
+                
+                # Create upstream cost sensor if we have an upstream energy meter
+                if upstream_energy_entity:
+                    # Find upstream meter entity
+                    upstream_meter_entity = None
+                    expected_upstream_meter_id = f"{group_id}_upstream_energy_meter" if group_id else f"{config_entry.entry_id}_{group_name.lower().replace(' ', '_')}_upstream_energy_meter"
+                    
+                    for entity_id, entry in entity_registry.entities.items():
+                        if (entry.unique_id == expected_upstream_meter_id and 
+                            entry.domain == "sensor" and
+                            entry.platform == DOMAIN):
+                            upstream_meter_entity = entity_id
+                            _LOGGER.debug("Found upstream meter entity: %s", upstream_meter_entity)
+                            break
+                    
+                    if upstream_meter_entity:
+                        upstream_cost_sensor = PhantomUpstreamCostSensor(
+                            hass,
+                            config_entry.entry_id,
+                            group_name,
+                            group_id,
+                            upstream_meter_entity,
+                            tariff_manager,
+                        )
+                        async_add_entities([upstream_cost_sensor])
+                        _LOGGER.info(
+                            "Created upstream cost sensor for group '%s' tracking upstream meter %s",
+                            group_name,
+                            upstream_meter_entity
+                        )
             else:
                 _LOGGER.error(
                     "No total cost sensors created for group '%s' after %d attempts - no utility meters found",

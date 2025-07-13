@@ -3,7 +3,7 @@
 # Export all sensor classes for easy importing
 from .power import PhantomPowerSensor, PhantomIndividualPowerSensor
 from .energy import PhantomEnergySensor, PhantomUtilityMeterSensor
-from .upstream import PhantomUpstreamPowerSensor, PhantomUpstreamEnergyMeterSensor
+from .upstream import PhantomUpstreamPowerSensor, PhantomUpstreamEnergyMeterSensor, PhantomUpstreamCostSensor
 from .remainder import PhantomPowerRemainderSensor, PhantomEnergyRemainderSensor
 from .cost import (
     PhantomDeviceHourlyCostSensor,
@@ -21,6 +21,7 @@ __all__ = [
     "PhantomUtilityMeterSensor",
     "PhantomUpstreamPowerSensor",
     "PhantomUpstreamEnergyMeterSensor",
+    "PhantomUpstreamCostSensor",
     "PhantomPowerRemainderSensor",
     "PhantomEnergyRemainderSensor",
     "PhantomDeviceHourlyCostSensor",
