@@ -9,6 +9,6 @@
   "integration_type": "device",
   "iot_class": "calculated",
   "requirements": [],
-  "version": "0.1.6",
+  "version": "0.1.7",
   "single_config_entry": true
 }
