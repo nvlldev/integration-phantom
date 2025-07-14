@@ -11,6 +11,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, callback, Event
 from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .base import PhantomBaseSensor
 from ..tariff import TariffManager
@@ -18,11 +19,11 @@ from ..tariff import TariffManager
 _LOGGER = logging.getLogger(__name__)
 
 
-class PhantomCostRemainderSensor(PhantomBaseSensor):
-    """Sensor showing instantaneous cost remainder (upstream cost - total cost)."""
+class PhantomCostRemainderSensor(PhantomBaseSensor, RestoreEntity):
+    """Sensor for accumulated cost remainder (unaccounted cost over time)."""
     
     _attr_device_class = None
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_suggested_display_precision = 2
     _attr_icon = "mdi:cash-minus"
     
@@ -45,6 +46,9 @@ class PhantomCostRemainderSensor(PhantomBaseSensor):
         self._attr_name = "Cost Remainder"
         self._attr_native_unit_of_measurement = tariff_manager.currency
         self._currency_symbol = tariff_manager.currency_symbol
+        self._last_upstream_value = None
+        self._last_total_value = None
+        self._accumulated_remainder = 0.0
         
     @property
     def extra_state_attributes(self):
@@ -55,29 +59,46 @@ class PhantomCostRemainderSensor(PhantomBaseSensor):
             "group_total_cost_entity": self._group_total_cost_entity,
         }
         
-        # Get current values to show in attributes
-        upstream_state = self.hass.states.get(self._upstream_cost_entity)
-        total_state = self.hass.states.get(self._group_total_cost_entity)
-        
-        if upstream_state and upstream_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-            try:
-                upstream_cost = float(upstream_state.state)
-                attrs["upstream_cost"] = upstream_cost
-            except (ValueError, TypeError):
-                pass
-                
-        if total_state and total_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-            try:
-                total_cost = float(total_state.state)
-                attrs["group_total_cost"] = total_cost
-            except (ValueError, TypeError):
-                pass
+        # Show instantaneous remainder for reference
+        if self._last_upstream_value is not None and self._last_total_value is not None:
+            attrs["instantaneous_remainder"] = self._last_upstream_value - self._last_total_value
+        if self._last_upstream_value is not None:
+            attrs["last_upstream_value"] = self._last_upstream_value
+        if self._last_total_value is not None:
+            attrs["last_total_value"] = self._last_total_value
                 
         return attrs
     
     async def async_added_to_hass(self) -> None:
         """Handle entity added to hass."""
         await super().async_added_to_hass()
+        
+        # Restore previous state if available
+        if (last_state := await self.async_get_last_state()) is not None:
+            if last_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                try:
+                    self._accumulated_remainder = float(last_state.state)
+                    self._attr_native_value = self._accumulated_remainder
+                    self._attr_available = True
+                    
+                    # Try to restore tracking values if they exist
+                    if "last_upstream_value" in last_state.attributes:
+                        self._last_upstream_value = float(last_state.attributes["last_upstream_value"])
+                    if "last_total_value" in last_state.attributes:
+                        self._last_total_value = float(last_state.attributes["last_total_value"])
+                    
+                    _LOGGER.info(
+                        "Restored cost remainder for '%s': %.2f %s",
+                        self._group_name,
+                        self._accumulated_remainder,
+                        self._currency_symbol,
+                    )
+                except (ValueError, TypeError):
+                    self._accumulated_remainder = 0.0
+                    self._attr_native_value = 0.0
+        else:
+            self._accumulated_remainder = 0.0
+            self._attr_native_value = 0.0
         
         # Track both cost entities
         self.async_on_remove(
@@ -111,9 +132,10 @@ class PhantomCostRemainderSensor(PhantomBaseSensor):
                 self._group_name,
                 self._upstream_cost_entity,
             )
-            # Show 0 when unavailable
-            self._attr_available = True
-            self._attr_native_value = 0.0
+            # Don't update if upstream is not available yet
+            # Keep previous state during restart
+            if not self._attr_available:
+                self._attr_native_value = self._accumulated_remainder
             return
             
         # Get group total cost
@@ -124,29 +146,61 @@ class PhantomCostRemainderSensor(PhantomBaseSensor):
                 self._group_name,
                 self._group_total_cost_entity,
             )
-            # Show 0 when unavailable
-            self._attr_available = True
-            self._attr_native_value = 0.0
+            # Don't update if total is not available yet
+            # Keep previous state during restart
+            if not self._attr_available:
+                self._attr_native_value = self._accumulated_remainder
             return
         
         try:
             upstream_cost = float(upstream_state.state)
             total_cost = float(total_state.state)
             
-            # Calculate instantaneous remainder (upstream - total)
-            remainder = upstream_cost - total_cost
+            # Calculate deltas if we have previous values
+            if self._last_upstream_value is not None and self._last_total_value is not None:
+                upstream_delta = upstream_cost - self._last_upstream_value
+                total_delta = total_cost - self._last_total_value
+                
+                # Only process if there's actual cost increase
+                if upstream_delta > 0.000001 or total_delta > 0.000001:
+                    # Calculate the remainder delta
+                    remainder_delta = upstream_delta - total_delta
+                    
+                    # Only accumulate positive remainder (unaccounted cost)
+                    if remainder_delta > 0:
+                        self._accumulated_remainder += remainder_delta
+                        _LOGGER.debug(
+                            "Cost remainder '%s' - upstream delta: %.2f, total delta: %.2f, remainder delta: %.2f, accumulated: %.2f %s",
+                            self._group_name,
+                            upstream_delta,
+                            total_delta,
+                            remainder_delta,
+                            self._accumulated_remainder,
+                            self._currency_symbol,
+                        )
+                    else:
+                        _LOGGER.debug(
+                            "Cost remainder '%s' - devices caught up, not accumulating negative remainder: %.2f %s",
+                            self._group_name,
+                            remainder_delta,
+                            self._currency_symbol,
+                        )
+                elif upstream_delta < -0.000001 or total_delta < -0.000001:
+                    # Handle meter resets - just log it, don't accumulate negative deltas
+                    _LOGGER.info(
+                        "Cost remainder '%s' - meter reset detected (upstream: %.2f->%.2f, total: %.2f->%.2f)",
+                        self._group_name,
+                        self._last_upstream_value,
+                        upstream_cost,
+                        self._last_total_value,
+                        total_cost,
+                    )
             
-            self._attr_native_value = remainder
+            # Update tracking values
+            self._last_upstream_value = upstream_cost
+            self._last_total_value = total_cost
+            self._attr_native_value = self._accumulated_remainder
             self._attr_available = True
-            
-            _LOGGER.debug(
-                "Cost remainder '%s' = upstream %.2f - total %.2f = %.2f %s",
-                self._group_name,
-                upstream_cost,
-                total_cost,
-                remainder,
-                self._currency_symbol,
-            )
             
         except (ValueError, TypeError) as err:
             _LOGGER.warning(
@@ -157,8 +211,12 @@ class PhantomCostRemainderSensor(PhantomBaseSensor):
                 total_state.state,
             )
             self._attr_available = True
-            self._attr_native_value = 0.0
+            self._attr_native_value = self._accumulated_remainder
     
     async def async_reset(self) -> None:
-        """Reset not applicable for instantaneous sensor."""
-        _LOGGER.info("Reset not applicable for instantaneous cost remainder sensor '%s'", self._group_name)
+        """Reset the cost remainder accumulator."""
+        _LOGGER.info("Resetting cost remainder for group '%s'", self._group_name)
+        self._accumulated_remainder = 0.0
+        self._attr_native_value = 0.0
+        # Keep the last values to continue tracking from current state
+        self.async_write_ha_state()
