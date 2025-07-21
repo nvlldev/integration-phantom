@@ -6,6 +6,23 @@ from unittest.mock import MagicMock, Mock
 def setup_mocks():
     """Set up all necessary mocks before any imports."""
     
+    # First, mock homeassistant.util and its submodules
+    sys.modules['homeassistant.util'] = MagicMock()
+    sys.modules['homeassistant.util.event_type'] = MagicMock()
+    sys.modules['homeassistant.util.async_'] = MagicMock()
+    
+    # Create EventType mock
+    EventType = MagicMock()
+    sys.modules['homeassistant.util.event_type'].EventType = EventType
+    
+    # Mock homeassistant.const before it's imported
+    const_mock = MagicMock()
+    const_mock.STATE_UNAVAILABLE = 'unavailable'
+    const_mock.STATE_UNKNOWN = 'unknown'
+    const_mock.UnitOfPower = Mock(WATT='W')
+    const_mock.UnitOfEnergy = Mock(KILO_WATT_HOUR='kWh')
+    sys.modules['homeassistant.const'] = const_mock
+    
     # Mock all problematic homeassistant.components modules
     components_to_mock = [
         'homeassistant.components',
@@ -31,20 +48,27 @@ def setup_mocks():
     sys.modules['homeassistant.components'].http = MagicMock()
     sys.modules['homeassistant.components.http'].StaticPathConfig = MagicMock()
     
-    # Mock other HA modules that might be needed
-    sys.modules['homeassistant.util.async_'] = MagicMock()
-    sys.modules['homeassistant.util'] = MagicMock()
+    # Mock homeassistant.core
+    core_mock = MagicMock()
+    core_mock.HomeAssistant = MagicMock
+    core_mock.State = MagicMock
+    core_mock.Event = MagicMock
+    sys.modules['homeassistant.core'] = core_mock
     
-    # Setup constants and enums
-    from homeassistant import const
-    if not hasattr(const, 'STATE_UNAVAILABLE'):
-        const.STATE_UNAVAILABLE = 'unavailable'
-    if not hasattr(const, 'STATE_UNKNOWN'):
-        const.STATE_UNKNOWN = 'unknown'
-    if not hasattr(const, 'UnitOfPower'):
-        const.UnitOfPower = Mock(WATT='W')
-    if not hasattr(const, 'UnitOfEnergy'):
-        const.UnitOfEnergy = Mock(KILO_WATT_HOUR='kWh')
+    # Mock homeassistant.components.sensor
+    sensor_mock = MagicMock()
+    sensor_mock.SensorEntity = MagicMock
+    sensor_mock.SensorStateClass = MagicMock()
+    sensor_mock.SensorDeviceClass = MagicMock()
+    sys.modules['homeassistant.components.sensor'] = sensor_mock
+    
+    # Mock homeassistant.helpers modules
+    sys.modules['homeassistant.helpers'] = MagicMock()
+    sys.modules['homeassistant.helpers.entity'] = MagicMock()
+    sys.modules['homeassistant.helpers.entity'].Entity = MagicMock
+    sys.modules['homeassistant.helpers.restore_state'] = MagicMock()
+    sys.modules['homeassistant.helpers.restore_state'].RestoreEntity = MagicMock
+    sys.modules['homeassistant.helpers.entity_registry'] = MagicMock()
 
 
 # Call setup before any other imports
