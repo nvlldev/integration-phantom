@@ -193,13 +193,15 @@ class PhantomCostRemainderSensor(PhantomBaseSensor, RestoreEntity):
                     
                     # Only accumulate positive remainder (unaccounted cost)
                     if remainder_delta > 0.000001:  # Use small threshold to avoid floating point issues
+                        old_accumulated = self._accumulated_remainder
                         self._accumulated_remainder += remainder_delta
                         _LOGGER.info(
-                            "Cost remainder '%s' - upstream delta: %.6f, total delta: %.6f, remainder delta: %.6f, accumulated: %.6f %s",
+                            "Cost remainder '%s' - upstream delta: %.6f, total delta: %.6f, remainder delta: %.6f, accumulated: %.6f->%.6f %s",
                             self._group_name,
                             upstream_delta,
                             total_delta,
                             remainder_delta,
+                            old_accumulated,
                             self._accumulated_remainder,
                             self._currency_symbol,
                         )
@@ -228,14 +230,18 @@ class PhantomCostRemainderSensor(PhantomBaseSensor, RestoreEntity):
                     upstream_cost,
                     total_cost,
                 )
+                # Don't accumulate anything on first run - we need two data points to calculate deltas
+                # This prevents the sanity check from incorrectly setting remainder to upstream value
             
             # Update tracking values
             self._last_upstream_value = upstream_cost
             self._last_total_value = total_cost
             
             # Sanity check: accumulated remainder should not exceed instantaneous remainder
+            # BUT only apply this check if we have meaningful device data (total > 0)
+            # This prevents incorrectly setting remainder to upstream value during startup
             instantaneous_remainder = upstream_cost - total_cost
-            if instantaneous_remainder > 0 and self._accumulated_remainder > instantaneous_remainder:
+            if total_cost > 0.000001 and instantaneous_remainder > 0 and self._accumulated_remainder > instantaneous_remainder:
                 _LOGGER.warning(
                     "Cost remainder '%s' - accumulated remainder (%.6f) exceeds instantaneous remainder (%.6f), resetting to instantaneous value",
                     self._group_name,
@@ -243,6 +249,9 @@ class PhantomCostRemainderSensor(PhantomBaseSensor, RestoreEntity):
                     instantaneous_remainder,
                 )
                 self._accumulated_remainder = instantaneous_remainder
+            # Note: We do NOT reset accumulated remainder when total_cost is 0
+            # This can happen during startup or when devices haven't reported yet
+            # The accumulated remainder is a running total and should be preserved
             
             self._attr_native_value = self._accumulated_remainder
             self._attr_available = True

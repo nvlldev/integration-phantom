@@ -210,6 +210,25 @@ class TestPhantomCostRemainderSensor:
         assert cost_remainder_sensor._accumulated_remainder == 0.06
         assert cost_remainder_sensor._attr_native_value == 0.06
 
+    def test_update_state_zero_total_preserves_accumulated(self, cost_remainder_sensor, mock_hass, mock_state):
+        """Test that accumulated remainder is preserved when total is zero."""
+        # Set previous values and accumulated remainder
+        cost_remainder_sensor._last_upstream_value = 0.10
+        cost_remainder_sensor._last_total_value = 0.05
+        cost_remainder_sensor._accumulated_remainder = 0.05
+        
+        # Mock states where total is zero (devices not reporting)
+        mock_hass.states.get.side_effect = lambda entity_id: {
+            "sensor.upstream_cost": mock_state("sensor.upstream_cost", "0.15"),
+            "sensor.group_total_cost": mock_state("sensor.group_total_cost", "0.0"),
+        }.get(entity_id)
+        
+        cost_remainder_sensor._update_state()
+        
+        # Should preserve accumulated remainder even though total is 0
+        assert cost_remainder_sensor._accumulated_remainder == 0.05
+        assert cost_remainder_sensor._attr_native_value == 0.05
+
     def test_update_state_upstream_unavailable(self, cost_remainder_sensor, mock_hass, mock_state):
         """Test handling upstream unavailable."""
         cost_remainder_sensor._accumulated_remainder = 0.05

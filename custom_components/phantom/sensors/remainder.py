@@ -541,13 +541,15 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor, RestoreEntity):
                 
                 # Only accumulate positive remainder (unaccounted energy)
                 if remainder_delta > 0.000001:  # Use small threshold to avoid floating point issues
+                    old_accumulated = self._accumulated_remainder
                     self._accumulated_remainder += remainder_delta
                     _LOGGER.info(
-                        "Energy remainder '%s' - upstream delta: %.6f, total delta: %.6f, remainder delta: %.6f, accumulated: %.6f kWh",
+                        "Energy remainder '%s' - upstream delta: %.6f, total delta: %.6f, remainder delta: %.6f, accumulated: %.6f->%.6f kWh",
                         self._group_name,
                         upstream_delta,
                         total_delta,
                         remainder_delta,
+                        old_accumulated,
                         self._accumulated_remainder,
                     )
                 else:
@@ -574,14 +576,18 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor, RestoreEntity):
                 upstream_value,
                 total,
             )
+            # Don't accumulate anything on first run - we need two data points to calculate deltas
+            # This prevents the sanity check from incorrectly setting remainder to upstream value
         
         # Update tracking values
         self._last_upstream_value = upstream_value
         self._last_total_value = total
         
         # Sanity check: accumulated remainder should not exceed instantaneous remainder
+        # BUT only apply this check if we have meaningful device data (total > 0)
+        # This prevents incorrectly setting remainder to upstream value during startup
         instantaneous_remainder = upstream_value - total
-        if instantaneous_remainder > 0 and self._accumulated_remainder > instantaneous_remainder:
+        if total > 0.000001 and instantaneous_remainder > 0 and self._accumulated_remainder > instantaneous_remainder:
             _LOGGER.warning(
                 "Energy remainder '%s' - accumulated remainder (%.6f) exceeds instantaneous remainder (%.6f), resetting to instantaneous value",
                 self._group_name,
@@ -589,6 +595,9 @@ class PhantomEnergyRemainderSensor(PhantomBaseSensor, RestoreEntity):
                 instantaneous_remainder,
             )
             self._accumulated_remainder = instantaneous_remainder
+        # Note: We do NOT reset accumulated remainder when total is 0
+        # This can happen during startup or when devices haven't reported yet
+        # The accumulated remainder is a running total and should be preserved
         
         self._attr_native_value = self._accumulated_remainder
         self._attr_available = True

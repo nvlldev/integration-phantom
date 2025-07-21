@@ -274,6 +274,30 @@ class TestPhantomEnergyRemainderSensor:
         assert energy_remainder_sensor._accumulated_remainder == pytest.approx(0.3, abs=1e-6)
         assert energy_remainder_sensor._attr_native_value == pytest.approx(0.3, abs=1e-6)
 
+    def test_update_state_zero_total_preserves_accumulated(self, energy_remainder_sensor, mock_hass, mock_state):
+        """Test that accumulated remainder is preserved when total is zero."""
+        energy_remainder_sensor._setup_delayed = True
+        energy_remainder_sensor._upstream_meter_entity = "sensor.upstream_meter"
+        energy_remainder_sensor._utility_meter_entities = ["sensor.device1_meter", "sensor.device2_meter"]
+        
+        # Set previous values and accumulated remainder
+        energy_remainder_sensor._last_upstream_value = 1.0
+        energy_remainder_sensor._last_total_value = 0.8
+        energy_remainder_sensor._accumulated_remainder = 0.2
+        
+        # Mock states where total is zero (devices not reporting)
+        mock_hass.states.get.side_effect = lambda entity_id: {
+            "sensor.upstream_meter": mock_state("sensor.upstream_meter", "1.5"),
+            "sensor.device1_meter": mock_state("sensor.device1_meter", "0.0"),
+            "sensor.device2_meter": mock_state("sensor.device2_meter", "0.0"),
+        }.get(entity_id)
+        
+        energy_remainder_sensor._update_state()
+        
+        # Should preserve accumulated remainder even though total is 0
+        assert energy_remainder_sensor._accumulated_remainder == 0.2
+        assert energy_remainder_sensor._attr_native_value == 0.2
+
     def test_update_state_upstream_unavailable(self, energy_remainder_sensor, mock_hass, mock_state):
         """Test handling upstream unavailable."""
         energy_remainder_sensor._setup_delayed = True
